@@ -1,0 +1,2 @@
+ALTER TABLE assets ADD COLUMN storage_provider TEXT NOT NULL DEFAULT 'r2';
+ALTER TABLE assets ADD COLUMN oss_key TEXT;

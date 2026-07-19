@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-后台入口为 `/admin`。生产环境需要配置 `ADMIN_EMAILS`、`REFERENCE_API_USERNAME`、`REFERENCE_API_PASSWORD` 和 `REFERENCE_API_BASE_URL`。
+后台入口为 `/admin`。生产环境需要配置 `ADMIN_EMAILS`、`REFERENCE_API_USERNAME`、`REFERENCE_API_PASSWORD` 和 `REFERENCE_API_BASE_URL`。已迁移 Nano Banana 素材由接口返回阿里云 OSS 的公开只读 URL，文件下载不经过 Material Hub 后端。
 
 ## App API
 

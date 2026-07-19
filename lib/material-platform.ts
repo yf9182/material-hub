@@ -16,6 +16,13 @@ export function safeObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
 }
 
+export function preferredTitle(value: unknown, fallback: string) {
+  const parsed = typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return {}; } })() : value;
+  const translations = safeObject(parsed);
+  const content = (lang: string) => { const item = safeObject(translations[lang]); return String(item.content ?? "").trim(); };
+  return content("zh-cn") || content("en") || fallback;
+}
+
 export function parseJsonObject(value: unknown): JsonObject | null {
   if (typeof value !== "string" || !value.trim()) return {};
   try { return safeObject(JSON.parse(value)); } catch {}
@@ -82,6 +89,12 @@ export function translationData(item: JsonObject, key: "material_lang" | "activi
 }
 
 export function wrapper(code: string, value: unknown[] = [], data: JsonObject = {}) { return { code, value, data }; }
+export function parsePrice(value: unknown, fallback: number | null) {
+  if (value === undefined) return { value: fallback };
+  if (value === null || String(value).trim() === "") return { value: null };
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? { value: parsed } : { error: "价格必须是非负整数" };
+}
 
 export const emptyIndependentKeys = ["audio_file_id", "hp_ol_original_1_file_id", "hp_ol_original_2_file_id", "hp_ol_original_3_file_id", "hp_ol_thumbnail_2_file_id", "independent_config", "is_free", "material_mark_list", "max_version", "min_version", "video_height", "video_preview_file_id", "video_width"];
 

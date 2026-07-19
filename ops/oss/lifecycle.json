@@ -1,0 +1,12 @@
+{
+  "Rule": [
+    {
+      "ID": "abort-incomplete-nano-banana-multipart-7d",
+      "Prefix": "materials/8801/nano-banana/",
+      "Status": "Enabled",
+      "AbortMultipartUpload": {
+        "Days": 7
+      }
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ApplyServerSideEncryptionByDefault": {
+    "SSEAlgorithm": "AES256"
+  }
+}

@@ -1,5 +1,6 @@
 import { initialProductId, seedCatalog } from "../../../../lib/catalog-repository";
-import { nowSeconds, objectId } from "../../../../lib/material-platform";
+import { publicOssURL } from "../../../../lib/oss";
+import { nowSeconds, objectId, parsePrice } from "../../../../lib/material-platform";
 import { adminEmail, platformEnv } from "../../../../lib/platform-runtime";
 
 type Row = Record<string, unknown>;
@@ -26,17 +27,17 @@ export async function GET(request: Request) {
   const [products, categories, materials, imports, keys, assets] = await Promise.all([
     db.prepare("SELECT id, external_pid, name, channel, source, status FROM products WHERE archived_at IS NULL ORDER BY created_at").all(),
     db.prepare("SELECT id, parent_id, name, code, status, sort_order, archived_at FROM categories WHERE product_id=? ORDER BY COALESCE(parent_id, id), sort_order, created_at").bind(selectedId).all(),
-    db.prepare(`SELECT m.id, m.external_material_id, m.source_key, m.internal_name, m.title_translations, m.activity_translations, m.material_config_raw, m.material_config_json, m.source_snapshot, m.manual_overrides, m.status, m.publish_status, m.listing_status, m.min_version, m.max_version, m.is_free, m.archived_at, m.updated_at,
+    db.prepare(`SELECT m.id, m.external_material_id, m.source_key, m.internal_name, m.title_translations, m.activity_translations, m.material_config_raw, m.material_config_json, m.source_snapshot, m.manual_overrides, m.status, m.publish_status, m.listing_status, m.min_version, m.max_version, m.is_free, m.price, m.archived_at, m.updated_at,
       GROUP_CONCAT(mc.category_id) category_ids, a.id asset_id
       FROM materials m LEFT JOIN material_categories mc ON mc.material_id=m.id AND mc.archived_at IS NULL
       LEFT JOIN assets a ON a.material_id=m.id AND a.role='thumbnail'
-      WHERE m.product_id=? GROUP BY m.id ORDER BY m.updated_at DESC`).bind(selectedId).all(),
+      WHERE m.product_id=? GROUP BY m.id ORDER BY m.updated_at DESC, m.id DESC`).bind(selectedId).all(),
     db.prepare("SELECT id, mode, status, source_label, summary, created_at, completed_at FROM import_jobs WHERE product_id=? ORDER BY created_at DESC LIMIT 12").bind(selectedId).all(),
     db.prepare("SELECT id, name, prefix, last_used_at, revoked_at, created_at FROM api_keys WHERE product_id=? ORDER BY created_at DESC").bind(selectedId).all(),
-    db.prepare("SELECT id, material_id, role, file_name, content_type, size, width, height, source_url FROM assets WHERE product_id=? ORDER BY created_at").bind(selectedId).all(),
+    db.prepare("SELECT id, material_id, role, file_name, content_type, size, width, height, source_url, storage_provider, oss_key FROM assets WHERE product_id=? ORDER BY created_at").bind(selectedId).all(),
   ]);
   const categoryRows = (categories.results as Row[]).map((row) => ({ ...row, archived: Boolean(row.archived_at) }));
-  const assetRows = assets.results as Row[]; const materialRows = (materials.results as Row[]).map((row) => ({ ...row, category_ids: String(row.category_ids ?? "").split(",").filter(Boolean), archived: Boolean(row.archived_at), title_translations: json(row.title_translations, {}), activity_translations: json(row.activity_translations, {}), material_config_json: json(row.material_config_json, {}), manual_overrides: json(row.manual_overrides, {}), source_snapshot: json(row.source_snapshot, {}), asset_files: assetRows.filter((asset) => asset.material_id === row.id) }));
+  const assetRows = (assets.results as Row[]).map((asset) => ({ ...asset, cdn_url: String(asset.storage_provider ?? "") === "aliyun-oss" && String(asset.oss_key ?? "") ? publicOssURL(String(asset.oss_key)) : `/api/assets/${asset.id}` })); const materialRows = (materials.results as Row[]).map((row) => ({ ...row, category_ids: String(row.category_ids ?? "").split(",").filter(Boolean), archived: Boolean(row.archived_at), title_translations: json(row.title_translations, {}), activity_translations: json(row.activity_translations, {}), material_config_json: json(row.material_config_json, {}), manual_overrides: json(row.manual_overrides, {}), source_snapshot: json(row.source_snapshot, {}), asset_files: assetRows.filter((asset) => asset.material_id === row.id) }));
   return Response.json({ actor, product: { id: product.id, pid: product.external_pid, name: product.name, channel: product.channel, source: product.source }, products: products.results, categories: categoryRows, materials: materialRows, imports: imports.results, keys: keys.results });
 }
 
@@ -65,6 +66,19 @@ export async function POST(request: Request) {
     await audit(actor, productId, "category.updated", "category", id, { name, code, parentId }); return Response.json({ ok: true });
   }
 
+  if (action === "move-category") {
+    const id = String(body.id ?? ""); const direction = body.direction === "up" ? -1 : body.direction === "down" ? 1 : 0;
+    if (!id || !direction) return Response.json({ error: "无效的分类排序操作" }, { status: 400 });
+    const current = await db.prepare("SELECT id, parent_id FROM categories WHERE id=? AND product_id=? AND parent_id IS NOT NULL AND status='active' AND archived_at IS NULL").bind(id, productId).first<Row>();
+    if (!current) return Response.json({ error: "二级分类不存在或已归档" }, { status: 404 });
+    const siblings = (await db.prepare("SELECT id FROM categories WHERE product_id=? AND parent_id=? AND status='active' AND archived_at IS NULL ORDER BY sort_order, created_at, id").bind(productId, current.parent_id).all<Row>()).results;
+    const currentIndex = siblings.findIndex((row) => String(row.id) === id); const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= siblings.length) return Response.json({ ok: true, moved: false });
+    const reordered = [...siblings]; [reordered[currentIndex], reordered[nextIndex]] = [reordered[nextIndex], reordered[currentIndex]];
+    await db.batch(reordered.map((row, index) => db.prepare("UPDATE categories SET sort_order=?, updated_at=? WHERE id=? AND product_id=?").bind((index + 1) * 10, now, row.id, productId)));
+    await audit(actor, productId, `category.moved_${body.direction}`, "category", id, { direction: body.direction, parentId: current.parent_id }); return Response.json({ ok: true, moved: true });
+  }
+
   if (action === "set-category-status") {
     const id = String(body.id ?? ""); const status = body.status === "archived" ? "archived" : "active"; const archivedAt = status === "archived" ? now : null;
     const result = await db.prepare("UPDATE categories SET status=?, archived_at=?, updated_at=? WHERE (id=? OR parent_id=?) AND product_id=?").bind(status, archivedAt, now, id, id, productId).run();
@@ -78,9 +92,9 @@ export async function POST(request: Request) {
     const id = objectId(); const relationId = objectId(); const name = String(body.name ?? "").trim(); const categoryId = String(body.categoryId ?? "");
     if (!name || !categoryId) return Response.json({ error: "名称和二级分类不能为空" }, { status: 400 });
     const category = await db.prepare("SELECT id FROM categories WHERE id=? AND product_id=? AND parent_id IS NOT NULL AND archived_at IS NULL").bind(categoryId, productId).first(); if (!category) return Response.json({ error: "二级分类无效" }, { status: 400 });
-    const translations = JSON.stringify({ en: { code: "en", content: name, is_default: 1 }, "zh-cn": { code: "zh-cn", content: String(body.nameZh ?? ""), is_default: 0 } }); const configRaw = body.configRaw === undefined ? JSON.stringify({ name, type: Number(body.type ?? 2) }) : String(body.configRaw); const configJson = json(body.configJson ?? configRaw, {}); if (!configJson || typeof configJson !== "object" || Array.isArray(configJson)) return Response.json({ error: "配置必须是 JSON 对象" }, { status: 400 });
+    const parsedPrice = parsePrice(body.price, 10); if ("error" in parsedPrice) return Response.json({ error: parsedPrice.error }, { status: 400 }); const price = parsedPrice.value; const translations = JSON.stringify({ en: { code: "en", content: name, is_default: 1 }, "zh-cn": { code: "zh-cn", content: String(body.nameZh ?? ""), is_default: 0 } }); const configRaw = body.configRaw === undefined ? JSON.stringify({ name, type: Number(body.type ?? 2) }) : String(body.configRaw); const configJson = json(body.configJson ?? configRaw, {}); if (!configJson || typeof configJson !== "object" || Array.isArray(configJson)) return Response.json({ error: "配置必须是 JSON 对象" }, { status: 400 });
     await db.batch([
-      db.prepare("INSERT INTO materials (id, product_id, source_key, internal_name, title_translations, activity_translations, material_config_raw, material_config_json, source_snapshot, manual_overrides, min_version, max_version, is_free, listing_status, publish_status, status, created_at, updated_at) VALUES (?, ?, 'manual', ?, ?, '{}', ?, ?, '{}', '{}', ?, ?, ?, 1, 0, 'draft', ?, ?)").bind(id, productId, name, translations, configRaw, JSON.stringify(configJson), String(body.minVersion ?? ""), String(body.maxVersion ?? ""), body.isFree ? 1 : 0, now, now),
+      db.prepare("INSERT INTO materials (id, product_id, source_key, internal_name, title_translations, activity_translations, material_config_raw, material_config_json, source_snapshot, manual_overrides, min_version, max_version, is_free, price, listing_status, publish_status, status, created_at, updated_at) VALUES (?, ?, 'manual', ?, ?, '{}', ?, ?, '{}', '{}', ?, ?, ?, ?, 1, 0, 'draft', ?, ?)").bind(id, productId, name, translations, configRaw, JSON.stringify(configJson), String(body.minVersion ?? ""), String(body.maxVersion ?? ""), price === 0 ? 1 : 0, price, now, now),
       db.prepare("INSERT INTO material_categories (id, product_id, material_id, category_id, sort_order, listing_status, created_at, updated_at) VALUES (?, ?, ?, ?, 100, 1, ?, ?)").bind(relationId, productId, id, categoryId, now, now),
     ]);
     await audit(actor, productId, "material.created", "material", id, { categoryId, name }); return Response.json({ id }, { status: 201 });
@@ -90,9 +104,9 @@ export async function POST(request: Request) {
     const id = String(body.id ?? ""); const current = await db.prepare("SELECT * FROM materials WHERE id=? AND product_id=?").bind(id, productId).first<Row>(); if (!current) return Response.json({ error: "素材不存在" }, { status: 404 });
     const name = String(body.name ?? current.internal_name).trim(); if (!name) return Response.json({ error: "素材名称不能为空" }, { status: 400 });
     const previousTitles = json(current.title_translations, {}) as Record<string, unknown>; const titles = JSON.stringify({ ...previousTitles, en: { code: "en", content: name, is_default: 1 }, "zh-cn": { code: "zh-cn", content: String(body.nameZh ?? (json(previousTitles, {}) as Row)["zh-cn"]?.content ?? ""), is_default: 0 } });
-    const configRaw = body.configRaw === undefined ? String(current.material_config_raw ?? "{}") : String(body.configRaw); const configJson = json(body.configJson ?? configRaw, {}); if (!configJson || typeof configJson !== "object" || Array.isArray(configJson)) return Response.json({ error: "配置必须是 JSON 对象" }, { status: 400 });
+    const parsedPrice = parsePrice(body.price, current.price === undefined ? 10 : current.price === null ? null : Number(current.price)); if ("error" in parsedPrice) return Response.json({ error: parsedPrice.error }, { status: 400 }); const price = parsedPrice.value; const configRaw = body.configRaw === undefined ? String(current.material_config_raw ?? "{}") : String(body.configRaw); const configJson = json(body.configJson ?? configRaw, {}); if (!configJson || typeof configJson !== "object" || Array.isArray(configJson)) return Response.json({ error: "配置必须是 JSON 对象" }, { status: 400 });
     const overrides = json(current.manual_overrides, {}) as Row; const mergedOverrides = { ...overrides, ...(body.overrides && typeof body.overrides === "object" ? body.overrides : {}) };
-    await db.prepare("UPDATE materials SET internal_name=?, title_translations=?, material_config_raw=?, material_config_json=?, min_version=?, max_version=?, is_free=?, manual_overrides=?, updated_at=? WHERE id=? AND product_id=?").bind(name, titles, configRaw, JSON.stringify(configJson), String(body.minVersion ?? current.min_version ?? ""), String(body.maxVersion ?? current.max_version ?? ""), body.isFree === undefined ? Number(current.is_free ?? 0) : (body.isFree ? 1 : 0), JSON.stringify(mergedOverrides), now, id, productId).run();
+    await db.prepare("UPDATE materials SET internal_name=?, title_translations=?, material_config_raw=?, material_config_json=?, min_version=?, max_version=?, is_free=?, price=?, manual_overrides=?, updated_at=? WHERE id=? AND product_id=?").bind(name, titles, configRaw, JSON.stringify(configJson), String(body.minVersion ?? current.min_version ?? ""), String(body.maxVersion ?? current.max_version ?? ""), price === 0 ? 1 : 0, price, JSON.stringify(mergedOverrides), now, id, productId).run();
     if (Array.isArray(body.categoryIds)) {
       const categoryIds = body.categoryIds.map(String); const valid = await db.prepare(`SELECT id FROM categories WHERE product_id=? AND parent_id IS NOT NULL AND archived_at IS NULL AND id IN (${categoryIds.map(() => "?").join(",") || "NULL"})`).bind(productId, ...categoryIds).all<Row>(); const validIds = new Set(valid.results.map((row) => String(row.id)));
       await db.prepare("UPDATE material_categories SET archived_at=?, listing_status=0, updated_at=? WHERE material_id=? AND product_id=?").bind(now, now, id, productId).run();

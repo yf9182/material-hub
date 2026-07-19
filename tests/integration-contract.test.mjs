@@ -24,3 +24,14 @@ test("integration surfaces keep the durable storage contract", () => {
   assert.match(assets, /MATERIAL_ASSETS\.put/);
   assert.match(assets, /INSERT INTO assets/);
 });
+
+test("admin and client contracts include localized titles, media previews, and price", () => {
+  const consoleSource = fs.readFileSync(new URL("../app/admin/MaterialConsole.tsx", import.meta.url), "utf8");
+  const repository = fs.readFileSync(new URL("../lib/catalog-repository.ts", import.meta.url), "utf8");
+  const schema = fs.readFileSync(new URL("../lib/ensure-schema.ts", import.meta.url), "utf8");
+  assert.match(consoleSource, /preferredTitle\(item\.title_translations, item\.internal_name\)/);
+  assert.match(consoleSource, /MediaPreview/);
+  assert.match(consoleSource, /积分价格/);
+  assert.match(repository, /independent\.price = wrapper\("price"/);
+  assert.match(schema, /ADD COLUMN price INTEGER DEFAULT 10/);
+});

@@ -22,7 +22,7 @@ export const materials = sqliteTable("materials", {
   activityTranslations: text("activity_translations", { mode: "json" }).$type<Record<string, unknown>>().notNull(), materialConfigRaw: text("material_config_raw").notNull().default("{}"),
   materialConfigJson: text("material_config_json", { mode: "json" }).$type<Record<string, unknown> | null>(), sourceSnapshot: text("source_snapshot", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
   manualOverrides: text("manual_overrides", { mode: "json" }).$type<Record<string, unknown>>().notNull(), minVersion: text("min_version").notNull().default(""), maxVersion: text("max_version").notNull().default(""),
-  isFree: integer("is_free").notNull().default(0), listingStatus: integer("listing_status").notNull().default(1), publishStatus: integer("publish_status").notNull().default(0),
+  isFree: integer("is_free").notNull().default(0), price: integer("price").default(10), listingStatus: integer("listing_status").notNull().default(1), publishStatus: integer("publish_status").notNull().default(0),
   status: text("status").notNull().default("draft"), archivedAt: integer("archived_at"), ...timestamps,
 }, (t) => [uniqueIndex("materials_source_external_uq").on(t.productId, t.sourceKey, t.externalMaterialId), index("materials_product_status_idx").on(t.productId, t.status, t.updatedAt)]);
 
@@ -34,7 +34,7 @@ export const materialCategories = sqliteTable("material_categories", {
 
 export const assets = sqliteTable("assets", {
   id: text("id").primaryKey(), productId: text("product_id").notNull().references(() => products.id), materialId: text("material_id").references(() => materials.id), role: text("role").notNull(),
-  r2Key: text("r2_key").notNull(), sourceUrl: text("source_url"), fileName: text("file_name").notNull(), contentType: text("content_type").notNull(), size: integer("size").notNull().default(0),
+  r2Key: text("r2_key").notNull(), storageProvider: text("storage_provider").notNull().default("r2"), ossKey: text("oss_key"), sourceUrl: text("source_url"), fileName: text("file_name").notNull(), contentType: text("content_type").notNull(), size: integer("size").notNull().default(0),
   hash: text("hash"), width: integer("width"), height: integer("height"), ...timestamps,
 }, (t) => [index("assets_material_role_idx").on(t.materialId, t.role), index("assets_hash_idx").on(t.productId, t.hash)]);
 

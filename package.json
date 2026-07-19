@@ -11,7 +11,11 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "oss:nano:dry-run": "node scripts/nano-banana-oss-migration.mjs --dry-run --require-known-size",
+    "oss:nano:sync": "node scripts/nano-banana-oss-migration.mjs --sync --require-known-size",
+    "oss:nano:bind:dry-run": "node scripts/backfill-nano-banana-oss.mjs",
+    "oss:nano:bind": "node scripts/backfill-nano-banana-oss.mjs --apply"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

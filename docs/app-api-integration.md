@@ -1,6 +1,6 @@
 # Material Hub · App 接入文档
 
-本文档描述 App 读取 Material Hub 素材目录的正式接口。App 只需要调用只读接口；素材、分类、发布状态均由后台管理。
+本文档描述 App 读取 Material Hub 素材目录的正式接口。App 只需要调用只读接口；素材、分类、发布状态均由后台管理。当前 Nano Banana 素材文件由 App 直接从阿里云 OSS 下载，不经过 Material Hub 文件代理。
 
 ## 管理后台访问
 
@@ -32,11 +32,15 @@
 
 API Key 由后台的「API Key」页面创建。密钥只在创建时展示一次；不要写入 App 包、代码仓库或日志。建议由自己的业务服务签发短期访问凭据，或使用安全存储保存可撤销的 Key。
 
-生产环境请将 Base URL 配置为 `https://material-hub-nano-banana.yangf999212.workers.dev`。这是 Cloudflare 自动提供的 HTTPS 地址，不需要购买域名。当前 Worker 使用 Cloudflare D1 保存目录数据、R2 按需缓存素材文件；App 仍需在每次目录请求中携带 `X-API-Key`。
+生产环境请将 Base URL 配置为 `https://material-hub-nano-banana.yangf999212.workers.dev`。这是 Cloudflare 自动提供的 HTTPS 地址，不需要购买域名。Cloudflare D1 保存目录数据；已完成迁移的 Nano Banana 素材通过响应中的阿里云 OSS 公开只读 URL 由 App 直接下载，文件字节不会经过 Material Hub 后端。目录接口仍需在每次请求中携带 `X-API-Key`。
 
 本地开发时才使用 `http://192.168.1.25:3000`。手机和电脑必须连接同一个 Wi-Fi；不要使用 `localhost`，因为它在手机上指向手机自身。此 IP 可能在切换网络或重新联网后改变，届时请在电脑上重新获取局域网 IP，并更新 App 配置。开发服务器已配置为监听局域网。
 
 局域网地址是开发期 HTTP 地址。iOS App 如启用了 App Transport Security、Android App 如禁用了明文流量，需要仅为开发环境允许访问 `192.168.1.25` 的 HTTP；正式环境使用上面的 HTTPS 地址。使用生产地址时不需要保持本地电脑开发服务器运行。
+
+### OSS 直链
+
+已迁移素材的 `cdn_url` 和 `file_url` 是 `https://material-hub-nano-sg-7f3a.oss-ap-southeast-1.aliyuncs.com/...` 公开只读地址。App 不需要携带 OSS 密钥，也不需要经过 `/api/assets/{assetId}` 代理；当前 483 个 Nano Banana 素材已完成绑定。未完成 OSS 绑定的旧素材才会暂时回退该代理地址。
 
 所有目录接口都使用 `GET`，并且只会返回启用分类下、处于已发布状态的素材。
 
@@ -241,7 +245,7 @@ X-API-Key: mat_your_api_key
       "value": ["asset-id"],
       "data": {
         "id": "asset-id",
-        "cdn_url": "/api/assets/asset-id",
+        "cdn_url": "https://material-hub-nano-sg-7f3a.oss-ap-southeast-1.aliyuncs.com/materials/8801/nano-banana/asset-id/original-file.jpg",
         "name": "original.jpg",
         "size": 123456,
         "hash": ""
@@ -255,9 +259,10 @@ X-API-Key: mat_your_api_key
       "value": ["translation-id"],
       "data": { "id": "translation-id", "lang": { "en": { "code": "en", "content": "Cartoon Family", "is_default": 1 } } }
     },
-    "thumbnail_file_id": { "code": "thumbnail_file_id", "value": ["asset-id"], "data": { "cdn_url": "/api/assets/asset-id" } },
+    "thumbnail_file_id": { "code": "thumbnail_file_id", "value": ["asset-id"], "data": { "cdn_url": "https://material-hub-nano-sg-7f3a.oss-ap-southeast-1.aliyuncs.com/materials/8801/nano-banana/asset-id/thumbnail-file.jpg" } },
     "video_preview_file_id": { "code": "video_preview_file_id", "value": [], "data": {} },
-    "min_version": { "code": "min_version", "value": ["2.4.0"], "data": {} }
+    "min_version": { "code": "min_version", "value": ["2.4.0"], "data": {} },
+    "price": { "code": "price", "value": [10], "data": {} }
   },
   "user_behaviors": [],
   "listing_status": 1,
@@ -290,6 +295,7 @@ X-API-Key: mat_your_api_key
 | 原图/结果图 | `public_properties.original_file_id.data.cdn_url` | 详情页或前后图的后图 |
 | 视频预览 | `independent_properties.video_preview_file_id.data.cdn_url` | 适用于视频/其他类型 |
 | 最低 App 版本 | `independent_properties.min_version.value[0]` | 为空时不限制 |
+| 积分价格 | `independent_properties.price.value[0]` | `0` 表示免费；`[]` 表示未定价；正整数表示积分价格 |
 
 ### 7.3 三种显示方式（必须按 `type` 判断）
 
@@ -309,7 +315,7 @@ const displayMode = config.type === 1 ? "comparison" : config.type === 2 ? "sing
 | 前图 | `independent_properties.thumbnail_file_id.data.cdn_url` | 缺失时使用后图；两者都缺失则显示占位图 |
 | 后图 | `public_properties.file_url.data.cdn_url` | 缺失时使用 `public_properties.original_file_id.data.cdn_url` |
 
-`file_url` 可能是外部绝对 URL；`original_file_id` 通常是站内相对 URL。两者都要通过第 8 节的 URL 规则处理。
+已迁移 Nano Banana 的 `file_url` 和 `original_file_id` 通常都是 OSS 绝对 URL；未迁移或手工创建的素材仍可能返回相对的 `/api/assets/{assetId}` 地址。两者都要通过第 8 节的 URL 规则处理。
 
 #### 方式二：单图展示（`type = 2`）
 
@@ -335,7 +341,7 @@ const displayMode = config.type === 1 ? "comparison" : config.type === 2 ? "sing
 
 ## 8. 文件访问
 
-文件地址由 `*.data.cdn_url` 返回。`/api/assets/{assetId}` 是公开的只读文件地址，不要求 `X-API-Key`，并会以长期缓存响应。
+文件地址由 `*.data.cdn_url` 返回。已迁移的 Nano Banana 素材是 OSS 公开只读 URL，不要求 `X-API-Key`，并可由 OSS 直接缓存下载；未绑定 OSS 的旧素材暂时回退 `/api/assets/{assetId}`。
 
 App 应按以下规则拼接文件 URL：
 

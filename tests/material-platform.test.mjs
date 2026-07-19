@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { langMap, matchesProductContext, normalizeReferencePayload, pageParams, parseJsonObject, propertyData, propertyValue, sha256Hex, wrapper } from "../lib/material-platform.ts";
+import { langMap, matchesProductContext, normalizeReferencePayload, pageParams, parseJsonObject, parsePrice, preferredTitle, propertyData, propertyValue, sha256Hex, wrapper } from "../lib/material-platform.ts";
 
 test("repairs conservative trailing commas but preserves unrepairable configs", () => {
   assert.deepEqual(parseJsonObject('{"name":"Face", "type":2,}'), { name: "Face", type: 2 });
@@ -29,6 +29,21 @@ test("keeps DTO wrapper data and effective property lookup stable", () => {
   assert.equal(propertyValue(item, "public_properties", "material_config"), '{"type":2}');
   assert.deepEqual(propertyData(item, "public_properties", "material_config"), { format: "json" });
   assert.deepEqual(wrapper("demo", ["id"], { file: "a.jpg" }), { code: "demo", value: ["id"], data: { file: "a.jpg" } });
+});
+
+test("uses the agreed integer price semantics", () => {
+  assert.deepEqual(parsePrice(undefined, 10), { value: 10 });
+  assert.deepEqual(parsePrice("", 10), { value: null });
+  assert.deepEqual(parsePrice("0", 10), { value: 0 });
+  assert.deepEqual(parsePrice("25", 10), { value: 25 });
+  assert.equal("error" in parsePrice("1.5", 10), true);
+  assert.equal("error" in parsePrice("-1", 10), true);
+});
+
+test("prefers Chinese titles and falls back predictably", () => {
+  assert.equal(preferredTitle({ en: { content: "English" }, "zh-cn": { content: "中文" } }, "Internal"), "中文");
+  assert.equal(preferredTitle({ en: { content: "English" } }, "Internal"), "English");
+  assert.equal(preferredTitle({}, "Internal"), "Internal");
 });
 
 test("preserves translations, pagination limits, and product context", () => {
