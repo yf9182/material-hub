@@ -7,6 +7,17 @@ The system SHALL allow an authorized administrator to synchronize category-tree 
 - **WHEN** an administrator selects a product and reference categories and requests a preview
 - **THEN** the system SHALL report category, material, asset, duplicate, and warning counts before creating records
 
+### Requirement: Import one material by ID into a selected secondary category
+The system SHALL let an authorized administrator preview and import one reference material by its 24-character ID only when an active secondary category is selected.
+
+#### Scenario: Import an existing reference material into another category
+- **WHEN** an administrator imports an already-known material ID into a different active secondary category
+- **THEN** the system SHALL refresh source-owned material fields and media, preserve manual overrides, add or restore the selected category relationship without duplicating the material, and keep the material as draft
+
+#### Scenario: Reject an invalid target category
+- **WHEN** the target is a root, archived, missing, or belongs to another product
+- **THEN** the system SHALL reject the request before creating an import job or copying media
+
 ### Requirement: JSON import
 The system SHALL accept pasted or uploaded JSON matching either the reference category-tree envelope or material-group envelope and SHALL normalize both inputs into the same import manifest.
 
@@ -49,4 +60,3 @@ The system SHALL expose job-level and item-level status for new, updated, skippe
 #### Scenario: Asset copy fails
 - **WHEN** a required remote file cannot be copied to owned storage
 - **THEN** the item SHALL record the failure, remain resumable and unpublished, and SHALL not prevent unrelated items from completing
-

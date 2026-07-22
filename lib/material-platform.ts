@@ -46,6 +46,69 @@ export type ImportManifest = {
   summary: { categories: number; materials: number; assets: number; warnings: number };
 };
 
+export type ImportedAssetReference = {
+  role: string;
+  section: "public_properties" | "independent_properties" | "material_config";
+  key: string;
+  data: JsonObject;
+};
+
+const importedAssetRoles: Record<string, string> = {
+  original_file_id: "original",
+  thumbnail_file_id: "thumbnail",
+  video_preview_file_id: "preview",
+  audio_file_id: "audio",
+  hp_ol_original_1_file_id: "hp_ol_original_1",
+  hp_ol_original_2_file_id: "hp_ol_original_2",
+  hp_ol_original_3_file_id: "hp_ol_original_3",
+  hp_ol_thumbnail_2_file_id: "hp_ol_thumbnail_2",
+};
+
+export function importedAssetReferences(item: JsonObject) {
+  const references: ImportedAssetReference[] = [];
+  const seen = new Set<string>();
+  for (const section of ["public_properties", "independent_properties"] as const) {
+    for (const [key, raw] of Object.entries(safeObject(item[section]))) {
+      if (!key.endsWith("_file_id") && key !== "file_url") continue;
+      const data = safeObject(safeObject(raw).data);
+      const url = String(data.cdn_url ?? "").trim();
+      if (!url) continue;
+      const role = importedAssetRoles[key] ?? (key === "file_url" ? "file" : key.replace(/_file_id$/, ""));
+      const signature = `${role}:${url}`;
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      references.push({ role, section, key, data });
+    }
+  }
+  const config = parseJsonObject(propertyValue(item, "public_properties", "material_config"));
+  const fileURL = config && typeof config.file_url === "string" ? config.file_url.trim() : "";
+  if (fileURL && !seen.has(`file:${fileURL}`)) references.push({ role: "file", section: "material_config", key: "file_url", data: { cdn_url: fileURL, name: "file_url" } });
+  return references;
+}
+
+export function isMaterialImportId(value: unknown) {
+  return /^[a-f0-9]{24}$/.test(String(value ?? "").trim().toLowerCase());
+}
+
+export function normalizeSingleMaterialPayload(payload: unknown, categoryId: string): ImportManifest {
+  if (!categoryId) throw new Error("必须选择二级分类");
+  const root = safeObject(payload);
+  const data = safeObject(root.data);
+  const nested = safeObject(data.item ?? data.material ?? data.product_material);
+  const item = Object.keys(nested).length ? nested : data;
+  if (!Object.keys(safeObject(item.public_properties)).length || !Object.keys(safeObject(item.independent_properties)).length) throw new Error("单素材接口返回结构无效");
+  const externalId = String(item.material_id ?? item.id ?? "").trim();
+  if (!externalId) throw new Error("单素材接口未返回素材 ID");
+  const rawConfig = propertyValue(item, "public_properties", "material_config");
+  const warnings = parseJsonObject(rawConfig) === null ? 1 : 0;
+  return {
+    kind: "material-groups",
+    categories: [],
+    groups: [{ categoryId, items: [item] }],
+    summary: { categories: 0, materials: 1, assets: importedAssetReferences(item).length, warnings },
+  };
+}
+
 export function normalizeReferencePayload(payload: unknown): ImportManifest {
   const root = safeObject(payload);
   const data = safeObject(root.data);
@@ -63,11 +126,7 @@ export function normalizeReferencePayload(payload: unknown): ImportManifest {
       return { categoryId: String(group.product_material_category_id ?? ""), items };
     }).filter((group) => group.categoryId);
     const items = groups.flatMap((group) => group.items);
-    const assets = items.reduce((count, item) => count + [
-      propertyData(item, "public_properties", "original_file_id").cdn_url,
-      propertyData(item, "independent_properties", "thumbnail_file_id").cdn_url,
-      propertyData(item, "independent_properties", "video_preview_file_id").cdn_url,
-    ].filter(Boolean).length, 0);
+    const assets = items.reduce((count, item) => count + importedAssetReferences(item).length, 0);
     return { kind: "material-groups", categories: [], groups, summary: { categories: groups.length, materials: items.length, assets, warnings } };
   }
   throw new Error("JSON 不是受支持的分类树或素材分组响应");

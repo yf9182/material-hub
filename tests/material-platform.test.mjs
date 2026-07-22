@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { langMap, matchesProductContext, normalizeReferencePayload, pageParams, parseJsonObject, parsePrice, preferredTitle, propertyData, propertyValue, sha256Hex, wrapper } from "../lib/material-platform.ts";
+import { importedAssetReferences, isMaterialImportId, langMap, matchesProductContext, normalizeReferencePayload, normalizeSingleMaterialPayload, pageParams, parseJsonObject, parsePrice, preferredTitle, propertyData, propertyValue, sha256Hex, wrapper } from "../lib/material-platform.ts";
 
 test("repairs conservative trailing commas but preserves unrepairable configs", () => {
   assert.deepEqual(parseJsonObject('{"name":"Face", "type":2,}'), { name: "Face", type: 2 });
@@ -16,6 +16,30 @@ test("normalizes grouped materials and counts invalid configs", () => {
   const item = { id: "rel", material_id: "mat", public_properties: { material_config: { value: ['{"name":"broken"'] }, original_file_id: { data: { cdn_url: "https://cdn.test/a.jpg" } } }, independent_properties: {} };
   const manifest = normalizeReferencePayload({ code: 1, data: { group: [{ product_material_category_id: "cat", list: [item] }] } });
   assert.equal(manifest.kind, "material-groups"); assert.equal(manifest.summary.materials, 1); assert.equal(manifest.summary.assets, 1); assert.equal(manifest.summary.warnings, 1);
+});
+
+test("normalizes one material into the selected secondary category and finds every media role", () => {
+  const item = {
+    id: "6a4f04d69f7229aee19f0f88", material_id: "6a4f04d69f7229aee19f0f89",
+    public_properties: {
+      material_config: { value: ['{"type":1,"file_url":"https://cdn.test/back.jpg"}'] },
+      original_file_id: { data: { id: "111111111111111111111111", cdn_url: "https://cdn.test/original.jpg" } },
+    },
+    independent_properties: {
+      material_internal_name: { value: ["Demo"] }, material_lang: { data: { lang: {} } },
+      thumbnail_file_id: { data: { cdn_url: "https://cdn.test/thumb.jpg" } },
+      video_preview_file_id: { data: { cdn_url: "https://cdn.test/preview.mp4" } },
+      audio_file_id: { data: { cdn_url: "https://cdn.test/audio.mp3" } },
+      hp_ol_original_1_file_id: { data: { cdn_url: "https://cdn.test/hp.jpg" } },
+    },
+  };
+  const manifest = normalizeSingleMaterialPayload({ code: 1, data: item }, "selected-child");
+  assert.equal(manifest.groups[0].categoryId, "selected-child");
+  assert.equal(manifest.summary.materials, 1);
+  assert.equal(manifest.summary.assets, 6);
+  assert.deepEqual(importedAssetReferences(item).map((asset) => asset.role), ["original", "thumbnail", "preview", "audio", "hp_ol_original_1", "file"]);
+  assert.equal(isMaterialImportId("6A4F04D69F7229AEE19F0F88"), true);
+  assert.equal(isMaterialImportId("../invalid"), false);
 });
 
 test("preserves the observed 6 plus 15 grouped pagination shape", () => {

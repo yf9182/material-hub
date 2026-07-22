@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { getAdminSession } from "./admin-auth";
 import { objectId, nowSeconds, sha256Hex } from "./material-platform";
 
-export type PlatformEnv = { DB: D1Database; MATERIAL_ASSETS: R2Bucket; ADMIN_EMAILS?: string; ADMIN_USERNAME?: string; ADMIN_PASSWORD_HASH?: string; REFERENCE_API_USERNAME?: string; REFERENCE_API_PASSWORD?: string; REFERENCE_API_BASE_URL?: string; DEMO_API_KEY?: string; OSS_REGION?: string; OSS_ENDPOINT?: string; OSS_BUCKET?: string; OSS_ACCESS_KEY_ID?: string; OSS_ACCESS_KEY_SECRET?: string; OSS_URL_TTL_SECONDS?: string };
+export type PlatformEnv = { DB: D1Database; MATERIAL_ASSETS: R2Bucket; ADMIN_EMAILS?: string; ADMIN_USERNAME?: string; ADMIN_PASSWORD_HASH?: string; REFERENCE_API_USERNAME?: string; REFERENCE_API_PASSWORD?: string; REFERENCE_API_BASE_URL?: string; DEMO_API_KEY?: string; OSS_REGION?: string; OSS_ENDPOINT?: string; OSS_BUCKET?: string; OSS_ACCESS_KEY_ID?: string; OSS_ACCESS_KEY_SECRET?: string; OSS_SESSION_TOKEN?: string; OSS_URL_TTL_SECONDS?: string };
 export function platformEnv() { return env as unknown as PlatformEnv; }
 export async function sha256(value: string) {
   return sha256Hex(value);

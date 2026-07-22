@@ -1,7 +1,7 @@
 import { platformEnv } from "./platform-runtime";
-import { publicOssURL } from "./oss";
+import { publicOssURL, putOssObject } from "./oss";
 import { ensureSchema } from "./ensure-schema";
-import { emptyIndependentKeys, langMap, nowSeconds, objectId, parseJsonObject, propertyData, propertyValue, safeObject, translationData, wrapper, type ImportManifest } from "./material-platform";
+import { emptyIndependentKeys, importedAssetReferences, langMap, nowSeconds, objectId, parseJsonObject, propertyValue, safeObject, translationData, wrapper, type ImportManifest, type ImportedAssetReference } from "./material-platform";
 
 const productId = "880100000000000000000001";
 
@@ -17,6 +17,10 @@ const parse = <T>(value: unknown, fallback: T): T => { try { return typeof value
 
 export async function productByPid(pid: string) {
   return platformEnv().DB.prepare("SELECT * FROM products WHERE external_pid = ? AND archived_at IS NULL LIMIT 1").bind(pid).first<Row>();
+}
+
+export async function productById(id: string) {
+  return platformEnv().DB.prepare("SELECT * FROM products WHERE id = ? AND archived_at IS NULL LIMIT 1").bind(id).first<Row>();
 }
 
 export async function categoryTree(product: Row) {
@@ -72,64 +76,70 @@ async function materialDto(row: Row) {
   independent.price = wrapper("price", row.price === null || row.price === undefined ? [] : [Number(row.price)]);
   independent.thumbnail_file_id = wrapper("thumbnail_file_id", asset("thumbnail") ? [asset("thumbnail")!.id] : [], thumbnailFile);
   independent.video_preview_file_id = wrapper("video_preview_file_id", asset("preview") ? [asset("preview")!.id] : [], previewFile);
+  for (const [key, role] of [["audio_file_id", "audio"], ["hp_ol_original_1_file_id", "hp_ol_original_1"], ["hp_ol_original_2_file_id", "hp_ol_original_2"], ["hp_ol_original_3_file_id", "hp_ol_original_3"], ["hp_ol_thumbnail_2_file_id", "hp_ol_thumbnail_2"]] as const) {
+    const roleAsset = asset(role);
+    independent[key] = wrapper(key, roleAsset ? [roleAsset.id] : [], await file(roleAsset));
+  }
   const publicProperties: Record<string, unknown> = { material_config: wrapper("material_config", [clientConfigRaw]), original_file_id: wrapper("original_file_id", originalAsset ? [originalAsset.id] : [], originalFile), relation_id: wrapper("relation_id", [""]) }; if (mediaType === 1) publicProperties.file_url = wrapper("file_url", fileAsset ? [fileAsset.id] : [], configuredFile);
   return { id: row.relation_id, material_id: row.id, public_properties: publicProperties, independent_properties: independent, user_behaviors: [], listing_status: row.relation_listing_status, publish_status: effective.publish_status, create_time: row.relation_created_at, update_time: row.relation_updated_at };
 }
 
 function referenceAssetURL(rawURL: string) {
-  if (!rawURL.startsWith("/")) return rawURL;
   const base = (platformEnv().REFERENCE_API_BASE_URL ?? "https://nmaterial-api.afirstsoft.cn").replace(/\/+$/, "");
-  return base + rawURL;
+  const url = new URL(rawURL.startsWith("/") ? base + rawURL : rawURL);
+  if (url.protocol !== "https:") throw new Error("远程素材必须使用 HTTPS 地址");
+  return url.toString();
 }
 
-async function syncAsset(
-  product: Row,
-  materialId: string,
-  role: "original" | "thumbnail" | "preview" | "file",
-  data: Record<string, unknown>,
-  now: number
-) {
-  const rawURL = String(data.cdn_url ?? "").trim();
-  if (!rawURL) return false;
+type PreparedAsset = {
+  id: string; role: string; key: string; sourceURL: string; fileName: string;
+  contentType: string; size: number; hash: string; createdAt: number;
+};
+
+function sourceId(value: unknown) {
+  const id = String(value ?? "").trim().toLowerCase();
+  return /^[a-f0-9]{24}$/.test(id) ? id : "";
+}
+
+function safeRole(role: string) {
+  return role.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "asset";
+}
+
+async function prepareImportedAsset(product: Row, materialId: string, reference: ImportedAssetReference, now: number): Promise<PreparedAsset> {
+  const rawURL = String(reference.data.cdn_url ?? "").trim();
+  if (!rawURL) throw new Error(`${reference.key} 缺少媒体地址`);
   const sourceURL = referenceAssetURL(rawURL);
   const db = platformEnv().DB;
-  const existing = await db.prepare("SELECT * FROM assets WHERE material_id = ? AND role = ? LIMIT 1").bind(materialId, role).first<Row>();
-  let assetId = String(existing?.id ?? "");
-  let r2Key = String(existing?.r2_key ?? "");
-
-  if (!assetId) {
-    assetId = String(data.id ?? objectId()).padStart(24, "0").slice(-24);
+  const existing = await db.prepare("SELECT * FROM assets WHERE material_id = ? AND role = ? LIMIT 1").bind(materialId, reference.role).first<Row>();
+  let assetId = String(existing?.id ?? "") || sourceId(reference.data.id) || objectId();
+  if (!existing) {
     const conflictingAsset = await db.prepare("SELECT material_id, role FROM assets WHERE id = ? LIMIT 1").bind(assetId).first<Row>();
-    if (conflictingAsset && (String(conflictingAsset.material_id) !== materialId || String(conflictingAsset.role) !== role)) assetId = objectId();
+    if (conflictingAsset && (String(conflictingAsset.material_id) !== materialId || String(conflictingAsset.role) !== reference.role)) assetId = objectId();
   }
-  if (!r2Key) r2Key = product.external_pid + "/" + materialId + "/" + role + "-" + assetId;
-
-  let contentType = String(existing?.content_type ?? "application/octet-stream");
-  let size = Number(data.size ?? existing?.size ?? 0);
-  const hash = String(data.hash ?? existing?.hash ?? "");
-  try {
-    const response = await fetch(sourceURL);
-    if (!response.ok || !response.body) throw new Error("source returned HTTP " + response.status);
-    contentType = response.headers.get("content-type") ?? contentType;
-    const contentLength = Number(response.headers.get("content-length") ?? 0);
-    if (!size && contentLength > 0) size = contentLength;
-    await platformEnv().MATERIAL_ASSETS.put(r2Key, response.body, { httpMetadata: { contentType } });
-  } catch {
-    throw new Error("资源下载失败：" + sourceURL);
+  const incomingSize = Math.max(0, Number(reference.data.size ?? 0) || 0);
+  const hash = String(reference.data.hash ?? existing?.hash ?? "");
+  const unchanged = existing && String(existing.storage_provider) === "aliyun-oss" && String(existing.oss_key ?? "")
+    && String(existing.source_url ?? "") === sourceURL
+    && (!incomingSize || incomingSize === Number(existing.size ?? 0))
+    && (!hash || hash === String(existing.hash ?? ""));
+  if (unchanged) {
+    return { id: assetId, role: reference.role, key: String(existing.oss_key), sourceURL, fileName: String(existing.file_name), contentType: String(existing.content_type), size: Number(existing.size ?? incomingSize), hash, createdAt: Number(existing.created_at ?? now) };
   }
-
-  const fileName = String(data.name ?? existing?.file_name ?? (role + "-" + assetId));
-  if (existing) {
-    await db.prepare("UPDATE assets SET source_url = ?, r2_key = ?, file_name = ?, content_type = ?, size = ?, hash = ?, updated_at = ? WHERE id = ?")
-      .bind(sourceURL, r2Key, fileName, contentType, size, hash, now, assetId).run();
-  } else {
-    await db.prepare("INSERT INTO assets (id, product_id, material_id, role, r2_key, source_url, file_name, content_type, size, hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(assetId, product.id, materialId, role, r2Key, sourceURL, fileName, contentType, size, hash, now, now).run();
-  }
+  const response = await fetch(sourceURL);
+  if (!response.ok || !response.body) throw new Error(`资源下载失败：HTTP ${response.status}`);
+  const headerSize = Math.max(0, Number(response.headers.get("content-length") ?? 0) || 0);
+  const size = incomingSize || headerSize;
+  if (size > 5 * 1024 ** 3) throw new Error(`${reference.key} 超过 5 GB，暂不支持导入`);
+  const contentType = response.headers.get("content-type") ?? String(existing?.content_type ?? "application/octet-stream");
+  const key = `materials/${String(product.external_pid)}/${materialId}/${safeRole(reference.role)}-${assetId}`;
+  await putOssObject(key, response.body, contentType);
+  let fallbackName = `${reference.role}-${assetId}`;
+  try { fallbackName = decodeURIComponent(new URL(sourceURL).pathname.split("/").pop() || fallbackName); } catch { /* keep fallback */ }
+  return { id: assetId, role: reference.role, key, sourceURL, fileName: String(reference.data.name ?? existing?.file_name ?? fallbackName), contentType, size, hash, createdAt: Number(existing?.created_at ?? now) };
 }
 
 export async function importManifest(product: Row, manifest: ImportManifest, actor: string) {
-  const db = platformEnv().DB; const now = nowSeconds(); let created = 0, updated = 0, failed = 0;
+  const db = platformEnv().DB; const now = nowSeconds(); let created = 0, updated = 0, linked = 0;
   for (const node of manifest.categories) {
     const id = String(node.id ?? objectId()); const parent = String(node.parent_id ?? "") || null;
     const exists = await db.prepare("SELECT id FROM categories WHERE product_id = ? AND external_id = ?").bind(product.id, id).first();
@@ -139,28 +149,39 @@ export async function importManifest(product: Row, manifest: ImportManifest, act
     if (exists) updated++; else created++;
   }
   for (const group of manifest.groups) for (const item of group.items) {
-    try {
-      const relationId = String(item.id ?? objectId()); const materialId = String(item.material_id ?? objectId());
-      const exists = await db.prepare("SELECT id FROM materials WHERE product_id = ? AND source_key = 'reference' AND external_material_id = ?").bind(product.id, materialId).first();
-      const rawConfig = String(propertyValue(item, "public_properties", "material_config") ?? "{}");
-      const internalName = String(propertyValue(item, "independent_properties", "material_internal_name") || materialId);
-      await db.prepare(`INSERT INTO materials (id, product_id, external_material_id, source_key, internal_name, title_translations, activity_translations, material_config_raw, material_config_json, source_snapshot, manual_overrides, min_version, max_version, is_free, price, listing_status, publish_status, status, created_at, updated_at) VALUES (?, ?, ?, 'reference', ?, ?, ?, ?, ?, ?, '{}', ?, ?, 0, 10, ?, ?, ?, ?, ?) ON CONFLICT(product_id, source_key, external_material_id) DO UPDATE SET internal_name=excluded.internal_name, title_translations=excluded.title_translations, activity_translations=excluded.activity_translations, material_config_raw=excluded.material_config_raw, material_config_json=excluded.material_config_json, source_snapshot=excluded.source_snapshot, min_version=excluded.min_version, max_version=excluded.max_version, listing_status=excluded.listing_status, publish_status=excluded.publish_status, status=excluded.status, updated_at=excluded.updated_at`)
-        .bind(materialId, product.id, materialId, internalName, JSON.stringify(translationData(item, "material_lang")), JSON.stringify(translationData(item, "activity_lang")), rawConfig, JSON.stringify(parseJsonObject(rawConfig)), JSON.stringify(item), String(propertyValue(item, "independent_properties", "min_version") ?? ""), String(propertyValue(item, "independent_properties", "max_version") ?? ""), Number(item.listing_status ?? 1), Number(item.publish_status ?? 0), Number(item.publish_status ?? 0) ? "published" : "draft", Number(item.create_time ?? now), now).run();
-      await db.prepare(`INSERT INTO material_categories (id, product_id, material_id, category_id, external_relation_id, sort_order, listing_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?) ON CONFLICT(material_id, category_id) DO UPDATE SET external_relation_id=excluded.external_relation_id, listing_status=excluded.listing_status, updated_at=excluded.updated_at`)
-        .bind(relationId, product.id, materialId, group.categoryId, relationId, Number(item.listing_status ?? 1), Number(item.create_time ?? now), now).run();
-      for (const [role, section, key] of [["original", "public_properties", "original_file_id"], ["thumbnail", "independent_properties", "thumbnail_file_id"], ["preview", "independent_properties", "video_preview_file_id"]] as const) {
-        await syncAsset(product, materialId, role, propertyData(item, section, key), now);
-      }
-      const config = parseJsonObject(rawConfig);
-      const configuredFileURL = config && typeof config.file_url === "string" ? config.file_url : "";
-      if (configuredFileURL) {
-        await syncAsset(product, materialId, "file", { cdn_url: configuredFileURL, name: "file_url" }, now);
-      }
-      if (exists) updated++; else created++;
-    } catch { failed++; }
+    const externalRelationId = String(item.id ?? "").trim();
+    const externalMaterialId = String(item.material_id ?? item.id ?? "").trim();
+    if (!externalMaterialId) throw new Error("素材缺少 material_id");
+    const existingMaterial = await db.prepare("SELECT * FROM materials WHERE product_id = ? AND source_key = 'reference' AND external_material_id = ? LIMIT 1").bind(product.id, externalMaterialId).first<Row>();
+    let materialId = String(existingMaterial?.id ?? "") || sourceId(externalMaterialId) || objectId();
+    if (!existingMaterial) {
+      const conflict = await db.prepare("SELECT id FROM materials WHERE id = ? LIMIT 1").bind(materialId).first();
+      if (conflict) materialId = objectId();
+    }
+    const existingRelation = await db.prepare("SELECT * FROM material_categories WHERE material_id = ? AND category_id = ? LIMIT 1").bind(materialId, group.categoryId).first<Row>();
+    let relationId = String(existingRelation?.id ?? "") || sourceId(externalRelationId) || objectId();
+    if (!existingRelation) {
+      const conflict = await db.prepare("SELECT id FROM material_categories WHERE id = ? LIMIT 1").bind(relationId).first();
+      if (conflict) relationId = objectId();
+    }
+    const preparedAssets: PreparedAsset[] = [];
+    for (const reference of importedAssetReferences(item)) preparedAssets.push(await prepareImportedAsset(product, materialId, reference, now));
+    const rawConfig = String(propertyValue(item, "public_properties", "material_config") ?? "{}");
+    const internalName = String(propertyValue(item, "independent_properties", "material_internal_name") || externalMaterialId);
+    const statements = [
+      db.prepare(`INSERT INTO materials (id, product_id, external_material_id, source_key, internal_name, title_translations, activity_translations, material_config_raw, material_config_json, source_snapshot, manual_overrides, min_version, max_version, is_free, price, listing_status, publish_status, status, created_at, updated_at) VALUES (?, ?, ?, 'reference', ?, ?, ?, ?, ?, ?, '{}', ?, ?, 0, 10, ?, 0, 'draft', ?, ?) ON CONFLICT(product_id, source_key, external_material_id) DO UPDATE SET internal_name=excluded.internal_name, title_translations=excluded.title_translations, activity_translations=excluded.activity_translations, material_config_raw=excluded.material_config_raw, material_config_json=excluded.material_config_json, source_snapshot=excluded.source_snapshot, min_version=excluded.min_version, max_version=excluded.max_version, listing_status=excluded.listing_status, publish_status=0, status='draft', archived_at=NULL, updated_at=excluded.updated_at`)
+        .bind(materialId, product.id, externalMaterialId, internalName, JSON.stringify(translationData(item, "material_lang")), JSON.stringify(translationData(item, "activity_lang")), rawConfig, JSON.stringify(parseJsonObject(rawConfig)), JSON.stringify(item), String(propertyValue(item, "independent_properties", "min_version") ?? ""), String(propertyValue(item, "independent_properties", "max_version") ?? ""), Number(item.listing_status ?? 1), Number(item.create_time ?? now), now),
+      db.prepare(`INSERT INTO material_categories (id, product_id, material_id, category_id, external_relation_id, sort_order, listing_status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, ?) ON CONFLICT(material_id, category_id) DO UPDATE SET external_relation_id=excluded.external_relation_id, listing_status=excluded.listing_status, archived_at=NULL, updated_at=excluded.updated_at`)
+        .bind(relationId, product.id, materialId, group.categoryId, externalRelationId || null, Number(item.listing_status ?? 1), Number(item.create_time ?? now), now),
+      ...preparedAssets.map((asset) => db.prepare(`INSERT INTO assets (id, product_id, material_id, role, r2_key, storage_provider, oss_key, source_url, file_name, content_type, size, hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'aliyun-oss', ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET product_id=excluded.product_id, material_id=excluded.material_id, role=excluded.role, r2_key=excluded.r2_key, storage_provider='aliyun-oss', oss_key=excluded.oss_key, source_url=excluded.source_url, file_name=excluded.file_name, content_type=excluded.content_type, size=excluded.size, hash=excluded.hash, updated_at=excluded.updated_at`)
+        .bind(asset.id, product.id, materialId, asset.role, asset.key, asset.key, asset.sourceURL, asset.fileName, asset.contentType, asset.size, asset.hash, asset.createdAt, now)),
+    ];
+    await db.batch(statements);
+    if (existingMaterial) updated++; else created++;
+    if (!existingRelation) linked++;
   }
-  await db.prepare("INSERT INTO audit_events (id, product_id, actor_email, action, target_type, target_id, changes, created_at) VALUES (?, ?, ?, 'import.completed', 'import', ?, ?, ?)").bind(objectId(), product.id, actor, objectId(), JSON.stringify({ created, updated, failed }), now).run();
-  return { created, updated, failed };
+  await db.prepare("INSERT INTO audit_events (id, product_id, actor_email, action, target_type, target_id, changes, created_at) VALUES (?, ?, ?, 'import.completed', 'import', ?, ?, ?)").bind(objectId(), product.id, actor, objectId(), JSON.stringify({ created, updated, linked, failed: 0 }), now).run();
+  return { created, updated, linked, failed: 0 };
 }
 
 export const initialProductId = productId;

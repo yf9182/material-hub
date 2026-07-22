@@ -26,7 +26,7 @@ The site has two audiences: administrators who manage and import content, and na
 
 ### Cloudflare-native application
 
-Use the existing Vinext starter, server-rendered admin routes, Cloudflare-compatible route handlers, D1 for relational metadata, and R2 for file bytes. Logical bindings are `DB` and `MATERIAL_ASSETS` (`ASSETS` remains reserved for the site's static-file fetcher). This keeps deployment within Sites and avoids operating a separate API service. PostgreSQL/S3 and a separate backend were rejected because they add infrastructure without improving the requested v1 workflows.
+Use the existing Vinext starter, server-rendered admin routes, Cloudflare-compatible route handlers, D1 for relational metadata, R2 for manual uploads, and Alibaba Cloud OSS for remotely imported media. Logical bindings remain `DB` and `MATERIAL_ASSETS` (`ASSETS` remains reserved for the site's static-file fetcher); OSS connection values are hosted runtime configuration. This keeps deployment within Sites and avoids operating a separate API service.
 
 ### Relational identity model
 
@@ -44,7 +44,7 @@ Internal tables remain normalized. A dedicated serializer builds reference-compa
 
 ### Import pipeline
 
-Both source-API synchronization and pasted/uploaded JSON normalize into the same import manifest. Import consists of preview, confirmed job creation, and bounded batches initiated by the admin client. Each batch claims pending items, upserts metadata transactionally, streams changed remote files into R2, and records per-item outcomes. Closing the page pauses rather than corrupts the job; reopening resumes pending batches.
+Source-API synchronization, pasted/uploaded JSON, and single-material ID lookup normalize into the same import manifest. Import consists of preview, confirmed job creation, and bounded batches initiated by the admin client. Each batch claims pending items, streams changed remote files into OSS with V4-signed requests, and only then commits metadata and category relationships. Closing the page pauses rather than corrupts the job; reopening resumes pending batches.
 
 Configuration parsing first tries strict JSON, then a conservative repair pass for trailing commas and similar syntax. Parse failure produces a warning and retains raw content. Assets deduplicate on content hash when available and otherwise on stable source URL plus source metadata. Newly imported records with required-file failures remain draft.
 
