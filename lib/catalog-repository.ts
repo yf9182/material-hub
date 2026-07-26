@@ -193,4 +193,15 @@ export async function deleteMaterial(materialId: string, productId: string) {
   ]);
 }
 
+export async function batchDeleteMaterials(materialIds: string[], productId: string) {
+  if (!materialIds.length) return;
+  const db = platformEnv().DB;
+  const placeholders = materialIds.map(() => "?").join(",");
+  await db.batch([
+    db.prepare(`DELETE FROM material_categories WHERE material_id IN (${placeholders}) AND product_id = ?`).bind(...materialIds, productId),
+    db.prepare(`DELETE FROM assets WHERE material_id IN (${placeholders}) AND product_id = ?`).bind(...materialIds, productId),
+    db.prepare(`DELETE FROM materials WHERE id IN (${placeholders}) AND product_id = ?`).bind(...materialIds, productId),
+  ]);
+}
+
 export const initialProductId = productId;

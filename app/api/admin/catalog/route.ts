@@ -1,4 +1,4 @@
-import { deleteMaterial, initialProductId, seedCatalog } from "../../../../lib/catalog-repository";
+import { batchDeleteMaterials, deleteMaterial, initialProductId, seedCatalog } from "../../../../lib/catalog-repository";
 import { publicOssURL } from "../../../../lib/oss";
 import { nowSeconds, objectId, parsePrice } from "../../../../lib/material-platform";
 import { adminEmail, platformEnv } from "../../../../lib/platform-runtime";
@@ -129,6 +129,15 @@ export async function POST(request: Request) {
     await deleteMaterial(id, productId);
     await audit(actor, productId, "material.deleted", "material", id, {});
     return Response.json({ ok: true });
+  }
+
+  if (action === "batch-delete-materials") {
+    const ids = body.ids as string[] | undefined;
+    if (!Array.isArray(ids) || ids.length === 0) return Response.json({ error: "请选择要删除的素材" }, { status: 400 });
+    if (ids.length > 100) return Response.json({ error: "单次最多删除 100 个素材" }, { status: 400 });
+    await batchDeleteMaterials(ids, productId);
+    await audit(actor, productId, "materials.batch_deleted", "materials", ids.join(","), { count: ids.length });
+    return Response.json({ ok: true, deleted: ids.length });
   }
 
   return Response.json({ error: "UNKNOWN_ACTION" }, { status: 400 });
