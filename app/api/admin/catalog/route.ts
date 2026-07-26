@@ -1,4 +1,4 @@
-import { initialProductId, seedCatalog } from "../../../../lib/catalog-repository";
+import { deleteMaterial, initialProductId, seedCatalog } from "../../../../lib/catalog-repository";
 import { publicOssURL } from "../../../../lib/oss";
 import { nowSeconds, objectId, parsePrice } from "../../../../lib/material-platform";
 import { adminEmail, platformEnv } from "../../../../lib/platform-runtime";
@@ -120,6 +120,15 @@ export async function POST(request: Request) {
     if (published) { const media = await db.prepare("SELECT role, content_type FROM assets WHERE material_id=?").bind(id).all<Row>(); const rows = media.results; if (!rows.some((item) => item.role === "original")) return Response.json({ error: "发布前必须上传主素材文件" }, { status: 400 }); if (rows.some((item) => String(item.content_type).startsWith("video/")) && !rows.some((item) => item.role === "thumbnail")) return Response.json({ error: "视频发布前必须上传封面" }, { status: 400 }); }
     const archivedAt = status === "archived" ? now : null; const result = await db.prepare("UPDATE materials SET status=?, publish_status=?, archived_at=?, updated_at=? WHERE id=? AND product_id=?").bind(status, published ? 1 : 0, archivedAt, now, id, productId).run(); if (!result.meta.changes) return Response.json({ error: "素材不存在" }, { status: 404 });
     await audit(actor, productId, `material.${status}`, "material", id, { status }); return Response.json({ ok: true });
+  }
+
+  if (action === "delete-material") {
+    const id = String(body.id ?? "");
+    const existing = await db.prepare("SELECT id FROM materials WHERE id=? AND product_id=?").bind(id, productId).first<Row>();
+    if (!existing) return Response.json({ error: "素材不存在" }, { status: 404 });
+    await deleteMaterial(id, productId);
+    await audit(actor, productId, "material.deleted", "material", id, {});
+    return Response.json({ ok: true });
   }
 
   return Response.json({ error: "UNKNOWN_ACTION" }, { status: 400 });

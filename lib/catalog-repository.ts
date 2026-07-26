@@ -184,4 +184,13 @@ export async function importManifest(product: Row, manifest: ImportManifest, act
   return { created, updated, linked, failed: 0 };
 }
 
+export async function deleteMaterial(materialId: string, productId: string) {
+  const db = platformEnv().DB;
+  await db.batch([
+    db.prepare("DELETE FROM material_categories WHERE material_id = ? AND product_id = ?").bind(materialId, productId),
+    db.prepare("DELETE FROM assets WHERE material_id = ? AND product_id = ?").bind(materialId, productId),
+    db.prepare("DELETE FROM materials WHERE id = ? AND product_id = ?").bind(materialId, productId),
+  ]);
+}
+
 export const initialProductId = productId;
