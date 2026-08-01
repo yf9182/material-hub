@@ -5,7 +5,8 @@ import { preferredTitle } from "../../lib/material-platform";
 
 type Category = { id: string; parent_id: string | null; name: string; code: string; status: string; archived?: boolean; archived_at?: number | null; sort_order?: number };
 type MediaAsset = { id: string; material_id?: string; role: "original" | "thumbnail" | "preview" | string; file_name?: string; content_type?: string; size?: number; source_url?: string; cdn_url?: string };
-type Material = { id: string; external_material_id?: string; source_key?: string; internal_name: string; title_translations: Record<string, unknown> | string; activity_translations?: Record<string, unknown> | string; material_config_raw?: string; material_config_json?: Record<string, unknown> | string; source_snapshot?: Record<string, unknown> | string; manual_overrides?: Record<string, unknown> | string; status: string; publish_status: number; listing_status?: number; updated_at: number; min_version?: string; max_version?: string; price?: number | null; category_ids?: string[]; archived?: boolean; asset_id?: string; asset_files?: MediaAsset[] };
+type MaterialCategoryRelation = { id: string; category_id: string; sort_order: number; created_at: number };
+type Material = { id: string; external_material_id?: string; source_key?: string; internal_name: string; title_translations: Record<string, unknown> | string; activity_translations?: Record<string, unknown> | string; material_config_raw?: string; material_config_json?: Record<string, unknown> | string; source_snapshot?: Record<string, unknown> | string; manual_overrides?: Record<string, unknown> | string; status: string; publish_status: number; listing_status?: number; updated_at: number; min_version?: string; max_version?: string; price?: number | null; category_ids?: string[]; category_relations?: MaterialCategoryRelation[]; archived?: boolean; asset_id?: string; asset_files?: MediaAsset[] };
 type Catalog = { product: { id: string; pid: string; name: string; channel?: string; source?: string }; products: { id: string; external_pid: string; name: string; channel: string; source: string; status: string }[]; categories: Category[]; materials: Material[]; imports: Record<string, unknown>[]; keys: Record<string, unknown>[] };
 type IdImportPreview = { materialId: string; title: string; categoryId: string; categoryName: string; existing: boolean; assets: number };
 const fallback: Catalog = { product: { id: "880100000000000000000001", pid: "8801", name: "VikPea · English" }, products: [{ id: "880100000000000000000001", external_pid: "8801", name: "VikPea · English", channel: "English", source: "English", status: "active" }], categories: [], materials: [
@@ -32,7 +33,15 @@ export default function MaterialConsole({ actor }: { actor: string }) {
   const materials = useMemo(() => {
     const category = selectedCategoryId ? catalog.categories.find((item) => item.id === selectedCategoryId) : null;
     const categoryIds = category && !category.parent_id ? catalog.categories.filter((item) => item.parent_id === category.id).map((item) => item.id) : selectedCategoryId ? [selectedCategoryId] : [];
-    return catalog.materials.filter((item) => materialSearchText(item).includes(query.toLowerCase()) && (!selectedCategoryId || (item.category_ids ?? []).some((id) => categoryIds.includes(id))));
+    const filtered = catalog.materials.filter((item) => materialSearchText(item).includes(query.toLowerCase()) && (!selectedCategoryId || (item.category_ids ?? []).some((id) => categoryIds.includes(id))));
+    if (!category?.parent_id) return filtered;
+    const relation = (item: Material) => item.category_relations?.find((entry) => entry.category_id === category.id);
+    return [...filtered].sort((left, right) => {
+      const leftRelation = relation(left); const rightRelation = relation(right);
+      return Number(leftRelation?.sort_order ?? 0) - Number(rightRelation?.sort_order ?? 0)
+        || Number(leftRelation?.created_at ?? 0) - Number(rightRelation?.created_at ?? 0)
+        || String(leftRelation?.id ?? "").localeCompare(String(rightRelation?.id ?? ""));
+    });
   }, [catalog.categories, catalog.materials, query, selectedCategoryId]);
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 2800); };
   async function postCatalog(payload: Record<string, unknown>) { const response = await fetch("/api/admin/catalog", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ productId, ...payload }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); await refresh(); return data; }

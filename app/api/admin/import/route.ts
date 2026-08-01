@@ -72,7 +72,7 @@ export async function POST(request: Request) {
       .bind(jobId, product.id, mode, sourceLabel, JSON.stringify({ kinds: manifests.map((m) => m.kind), preview }), JSON.stringify(summary), actor, now, now).run();
     const items = manifests.flatMap((manifest) => manifest.kind === "category-tree"
       ? manifest.categories.map((category) => ({ kind: "category", manifest: { kind: "category-tree", categories: [category], groups: [], summary: { categories: 1, materials: 0, assets: 0, warnings: 0 } } }))
-      : manifest.groups.flatMap((group) => group.items.map((item) => ({ kind: "material", manifest: { kind: "material-groups", categories: [], groups: [{ categoryId: group.categoryId, items: [item] }], summary: { categories: 1, materials: 1, assets: 0, warnings: 0 } } }))));
+      : manifest.groups.flatMap((group) => group.items.map((item, index) => ({ kind: "material", manifest: { kind: "material-groups", categories: [], groups: [{ categoryId: group.categoryId, items: [item], ...(mode === "material-id" ? {} : { sortOrder: (index + 1) * 10 }) }], summary: { categories: 1, materials: 1, assets: 0, warnings: 0 } } }))));
     for (const item of items) await platformEnv().DB.prepare("INSERT INTO import_items (id, job_id, item_type, status, payload, attempts, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?)").bind(objectId(), jobId, item.kind, JSON.stringify(item.manifest), now, now).run();
     return Response.json({ summary, ...(await processJob(jobId, actor)) });
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "导入失败" }, { status: 400 }); }

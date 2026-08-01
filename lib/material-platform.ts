@@ -72,7 +72,7 @@ export function propertyData(item: JsonObject, section: "public_properties" | "i
 export type ImportManifest = {
   kind: "category-tree" | "material-groups";
   categories: JsonObject[];
-  groups: Array<{ categoryId: string; items: JsonObject[] }>;
+  groups: Array<{ categoryId: string; items: JsonObject[]; sortOrder?: number }>;
   summary: { categories: number; materials: number; assets: number; warnings: number };
 };
 

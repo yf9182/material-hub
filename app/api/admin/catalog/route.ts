@@ -24,20 +24,21 @@ export async function GET(request: Request) {
   await seedCatalog(); const db = platformEnv().DB; const url = new URL(request.url);
   const selectedId = url.searchParams.get("productId") || initialProductId; const product = await validProduct(selectedId);
   if (!product) return Response.json({ error: "PRODUCT_NOT_FOUND" }, { status: 404 });
-  const [products, categories, materials, imports, keys, assets] = await Promise.all([
+  const [products, categories, materials, materialRelations, imports, keys, assets] = await Promise.all([
     db.prepare("SELECT id, external_pid, name, channel, source, status FROM products WHERE archived_at IS NULL ORDER BY created_at").all(),
     db.prepare("SELECT id, parent_id, name, code, status, sort_order, archived_at FROM categories WHERE product_id=? ORDER BY COALESCE(parent_id, id), sort_order, created_at").bind(selectedId).all(),
     db.prepare(`SELECT m.id, m.external_material_id, m.source_key, m.internal_name, m.title_translations, m.activity_translations, m.material_config_raw, m.material_config_json, m.source_snapshot, m.manual_overrides, m.status, m.publish_status, m.listing_status, m.min_version, m.max_version, m.is_free, m.price, m.archived_at, m.updated_at,
-      GROUP_CONCAT(mc.category_id) category_ids, a.id asset_id
-      FROM materials m LEFT JOIN material_categories mc ON mc.material_id=m.id AND mc.archived_at IS NULL
-      LEFT JOIN assets a ON a.material_id=m.id AND a.role='thumbnail'
+      a.id asset_id
+      FROM materials m LEFT JOIN assets a ON a.material_id=m.id AND a.role='thumbnail'
       WHERE m.product_id=? GROUP BY m.id ORDER BY m.updated_at DESC, m.id DESC`).bind(selectedId).all(),
+    db.prepare("SELECT id, material_id, category_id, sort_order, created_at FROM material_categories WHERE product_id=? AND archived_at IS NULL ORDER BY category_id, sort_order, created_at, id").bind(selectedId).all(),
     db.prepare("SELECT id, mode, status, source_label, summary, created_at, completed_at FROM import_jobs WHERE product_id=? ORDER BY created_at DESC LIMIT 12").bind(selectedId).all(),
     db.prepare("SELECT id, name, prefix, last_used_at, revoked_at, created_at FROM api_keys WHERE product_id=? ORDER BY created_at DESC").bind(selectedId).all(),
     db.prepare("SELECT id, material_id, role, file_name, content_type, size, width, height, source_url, storage_provider, oss_key FROM assets WHERE product_id=? ORDER BY created_at").bind(selectedId).all(),
   ]);
   const categoryRows = (categories.results as Row[]).map((row) => ({ ...row, archived: Boolean(row.archived_at) }));
-  const assetRows = (assets.results as Row[]).map((asset) => ({ ...asset, cdn_url: String(asset.storage_provider ?? "") === "aliyun-oss" && String(asset.oss_key ?? "") ? publicOssURL(String(asset.oss_key)) : `/api/assets/${asset.id}` })); const materialRows = (materials.results as Row[]).map((row) => ({ ...row, category_ids: String(row.category_ids ?? "").split(",").filter(Boolean), archived: Boolean(row.archived_at), title_translations: json(row.title_translations, {}), activity_translations: json(row.activity_translations, {}), material_config_json: json(row.material_config_json, {}), manual_overrides: json(row.manual_overrides, {}), source_snapshot: json(row.source_snapshot, {}), asset_files: assetRows.filter((asset) => asset.material_id === row.id) }));
+  const relationRows = materialRelations.results as Row[];
+  const assetRows = (assets.results as Row[]).map((asset) => ({ ...asset, cdn_url: String(asset.storage_provider ?? "") === "aliyun-oss" && String(asset.oss_key ?? "") ? publicOssURL(String(asset.oss_key)) : `/api/assets/${asset.id}` })); const materialRows = (materials.results as Row[]).map((row) => { const categoryRelations = relationRows.filter((relation) => relation.material_id === row.id); return { ...row, category_ids: categoryRelations.map((relation) => String(relation.category_id)), category_relations: categoryRelations, archived: Boolean(row.archived_at), title_translations: json(row.title_translations, {}), activity_translations: json(row.activity_translations, {}), material_config_json: json(row.material_config_json, {}), manual_overrides: json(row.manual_overrides, {}), source_snapshot: json(row.source_snapshot, {}), asset_files: assetRows.filter((asset) => asset.material_id === row.id) }; });
   return Response.json({ actor, product: { id: product.id, pid: product.external_pid, name: product.name, channel: product.channel, source: product.source }, products: products.results, categories: categoryRows, materials: materialRows, imports: imports.results, keys: keys.results });
 }
 
@@ -93,9 +94,10 @@ export async function POST(request: Request) {
     if (!name || !categoryId) return Response.json({ error: "名称和二级分类不能为空" }, { status: 400 });
     const category = await db.prepare("SELECT id FROM categories WHERE id=? AND product_id=? AND parent_id IS NOT NULL AND archived_at IS NULL").bind(categoryId, productId).first(); if (!category) return Response.json({ error: "二级分类无效" }, { status: 400 });
     const parsedPrice = parsePrice(body.price, 10); if ("error" in parsedPrice) return Response.json({ error: parsedPrice.error }, { status: 400 }); const price = parsedPrice.value; const translations = JSON.stringify({ en: { code: "en", content: name, is_default: 1 }, "zh-cn": { code: "zh-cn", content: String(body.nameZh ?? ""), is_default: 0 } }); const configInput = body.configRaw === undefined ? JSON.stringify({ name, type: Number(body.type ?? 2) }) : String(body.configRaw); const preparedConfig = prepareMaterialConfig(configInput); if ("error" in preparedConfig) return Response.json({ error: preparedConfig.error }, { status: 400 }); const configRaw = preparedConfig.raw; const configJson = preparedConfig.config;
+    const maxSort = await db.prepare("SELECT COALESCE(MAX(sort_order), 0) value FROM material_categories WHERE product_id=? AND category_id=? AND archived_at IS NULL").bind(productId, categoryId).first<Row>();
     await db.batch([
       db.prepare("INSERT INTO materials (id, product_id, source_key, internal_name, title_translations, activity_translations, material_config_raw, material_config_json, source_snapshot, manual_overrides, min_version, max_version, is_free, price, listing_status, publish_status, status, created_at, updated_at) VALUES (?, ?, 'manual', ?, ?, '{}', ?, ?, '{}', '{}', ?, ?, ?, ?, 1, 0, 'draft', ?, ?)").bind(id, productId, name, translations, configRaw, JSON.stringify(configJson), String(body.minVersion ?? ""), String(body.maxVersion ?? ""), price === 0 ? 1 : 0, price, now, now),
-      db.prepare("INSERT INTO material_categories (id, product_id, material_id, category_id, sort_order, listing_status, created_at, updated_at) VALUES (?, ?, ?, ?, 100, 1, ?, ?)").bind(relationId, productId, id, categoryId, now, now),
+      db.prepare("INSERT INTO material_categories (id, product_id, material_id, category_id, sort_order, listing_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)").bind(relationId, productId, id, categoryId, Number(maxSort?.value ?? 0) + 10, now, now),
     ]);
     await audit(actor, productId, "material.created", "material", id, { categoryId, name }); return Response.json({ id }, { status: 201 });
   }
@@ -110,7 +112,7 @@ export async function POST(request: Request) {
     if (Array.isArray(body.categoryIds)) {
       const categoryIds = body.categoryIds.map(String); const valid = await db.prepare(`SELECT id FROM categories WHERE product_id=? AND parent_id IS NOT NULL AND archived_at IS NULL AND id IN (${categoryIds.map(() => "?").join(",") || "NULL"})`).bind(productId, ...categoryIds).all<Row>(); const validIds = new Set(valid.results.map((row) => String(row.id)));
       await db.prepare("UPDATE material_categories SET archived_at=?, listing_status=0, updated_at=? WHERE material_id=? AND product_id=?").bind(now, now, id, productId).run();
-      for (const categoryId of categoryIds.filter((value) => validIds.has(value))) await db.prepare("INSERT INTO material_categories (id, product_id, material_id, category_id, sort_order, listing_status, created_at, updated_at) VALUES (?, ?, ?, ?, 100, 1, ?, ?) ON CONFLICT(material_id, category_id) DO UPDATE SET archived_at=NULL, listing_status=1, updated_at=?").bind(objectId(), productId, id, categoryId, now, now, now).run();
+      for (const categoryId of categoryIds.filter((value) => validIds.has(value))) await db.prepare("INSERT INTO material_categories (id, product_id, material_id, category_id, sort_order, listing_status, created_at, updated_at) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 10 FROM material_categories WHERE product_id=? AND category_id=? AND archived_at IS NULL), 1, ?, ?) ON CONFLICT(material_id, category_id) DO UPDATE SET archived_at=NULL, listing_status=1, updated_at=?").bind(objectId(), productId, id, categoryId, productId, categoryId, now, now, now).run();
     }
     await audit(actor, productId, "material.updated", "material", id, { name, categoryIds: body.categoryIds }); return Response.json({ ok: true });
   }

@@ -41,3 +41,14 @@ test("admin and client contracts include localized titles, media previews, and p
   assert.match(repository, /independent\.price = wrapper\("price"/);
   assert.match(schema, /ADD COLUMN price INTEGER DEFAULT 10/);
 });
+
+test("admin and client use the same category-scoped material order", () => {
+  const consoleSource = fs.readFileSync(new URL("../app/admin/MaterialConsole.tsx", import.meta.url), "utf8");
+  const adminRoute = fs.readFileSync(new URL("../app/api/admin/catalog/route.ts", import.meta.url), "utf8");
+  const repository = fs.readFileSync(new URL("../lib/catalog-repository.ts", import.meta.url), "utf8");
+  assert.match(repository, /ORDER BY r\.sort_order ASC, r\.created_at ASC, r\.id ASC/);
+  assert.match(repository, /sort_order=excluded\.sort_order/);
+  assert.match(adminRoute, /category_relations: categoryRelations/);
+  assert.match(consoleSource, /leftRelation\?\.sort_order/);
+  assert.match(consoleSource, /leftRelation\?\.created_at/);
+});

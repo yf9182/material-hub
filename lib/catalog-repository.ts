@@ -46,7 +46,7 @@ export async function materialGroups(product: Row, categoryIds: string[], page: 
     const category = await platformEnv().DB.prepare("SELECT id FROM categories WHERE id = ? AND product_id = ? AND parent_id IS NOT NULL AND status = 'active' AND archived_at IS NULL").bind(categoryId, product.id).first();
     if (!category) continue;
     const count = await platformEnv().DB.prepare(`SELECT COUNT(*) total FROM material_categories r JOIN materials m ON m.id = r.material_id WHERE r.category_id = ? AND r.archived_at IS NULL AND r.listing_status = 1 AND m.publish_status = 1 AND m.status = 'published' AND m.archived_at IS NULL`).bind(categoryId).first<{ total: number }>();
-    const rows = (await platformEnv().DB.prepare(`SELECT r.id relation_id, r.listing_status relation_listing_status, r.created_at relation_created_at, r.updated_at relation_updated_at, m.* FROM material_categories r JOIN materials m ON m.id = r.material_id WHERE r.category_id = ? AND r.archived_at IS NULL AND r.listing_status = 1 AND m.publish_status = 1 AND m.status = 'published' AND m.archived_at IS NULL ORDER BY m.updated_at DESC, m.id DESC LIMIT ? OFFSET ?`).bind(categoryId, pageSize, (page - 1) * pageSize).all<Row>()).results;
+    const rows = (await platformEnv().DB.prepare(`SELECT r.id relation_id, r.sort_order relation_sort_order, r.listing_status relation_listing_status, r.created_at relation_created_at, r.updated_at relation_updated_at, m.* FROM material_categories r JOIN materials m ON m.id = r.material_id WHERE r.category_id = ? AND r.archived_at IS NULL AND r.listing_status = 1 AND m.publish_status = 1 AND m.status = 'published' AND m.archived_at IS NULL ORDER BY r.sort_order ASC, r.created_at ASC, r.id ASC LIMIT ? OFFSET ?`).bind(categoryId, pageSize, (page - 1) * pageSize).all<Row>()).results;
     const list = [];
     for (const row of rows) list.push(await materialDto(row));
     groups.push({ pager: { page, page_size: pageSize, total: Number(count?.total ?? 0) }, product_material_category_id: categoryId, list });
@@ -148,7 +148,7 @@ export async function importManifest(product: Row, manifest: ImportManifest, act
       .bind(id, product.id, parent, id, String(node.name ?? ""), String(node.code ?? node.name ?? ""), String(node.config ?? ""), translations, JSON.stringify(node.marks ?? []), Number(node.material_latest_update_time ?? 0), Number(node.create_time ?? now), now).run();
     if (exists) updated++; else created++;
   }
-  for (const group of manifest.groups) for (const item of group.items) {
+  for (const group of manifest.groups) for (const [itemIndex, item] of group.items.entries()) {
     const externalRelationId = String(item.id ?? "").trim();
     const externalMaterialId = String(item.material_id ?? item.id ?? "").trim();
     if (!externalMaterialId) throw new Error("素材缺少 material_id");
@@ -164,6 +164,9 @@ export async function importManifest(product: Row, manifest: ImportManifest, act
       const conflict = await db.prepare("SELECT id FROM material_categories WHERE id = ? LIMIT 1").bind(relationId).first();
       if (conflict) relationId = objectId();
     }
+    const requestedSortOrder = Number(group.sortOrder ?? (group.items.length > 1 ? (itemIndex + 1) * 10 : 0));
+    const maxSort = requestedSortOrder > 0 || existingRelation ? null : await db.prepare("SELECT COALESCE(MAX(sort_order), 0) value FROM material_categories WHERE product_id=? AND category_id=? AND archived_at IS NULL").bind(product.id, group.categoryId).first<Row>();
+    const relationSortOrder = requestedSortOrder > 0 ? requestedSortOrder : existingRelation ? Number(existingRelation.sort_order ?? 0) : Number(maxSort?.value ?? 0) + 10;
     const preparedAssets: PreparedAsset[] = [];
     for (const reference of importedAssetReferences(item)) preparedAssets.push(await prepareImportedAsset(product, materialId, reference, now));
     const sourceRawConfig = String(propertyValue(item, "public_properties", "material_config") ?? "{}");
@@ -173,8 +176,8 @@ export async function importManifest(product: Row, manifest: ImportManifest, act
     const statements = [
       db.prepare(`INSERT INTO materials (id, product_id, external_material_id, source_key, internal_name, title_translations, activity_translations, material_config_raw, material_config_json, source_snapshot, manual_overrides, min_version, max_version, is_free, price, listing_status, publish_status, status, created_at, updated_at) VALUES (?, ?, ?, 'reference', ?, ?, ?, ?, ?, ?, '{}', ?, ?, 0, 10, ?, 0, 'draft', ?, ?) ON CONFLICT(product_id, source_key, external_material_id) DO UPDATE SET internal_name=excluded.internal_name, title_translations=excluded.title_translations, activity_translations=excluded.activity_translations, material_config_raw=excluded.material_config_raw, material_config_json=excluded.material_config_json, source_snapshot=excluded.source_snapshot, min_version=excluded.min_version, max_version=excluded.max_version, listing_status=excluded.listing_status, publish_status=0, status='draft', archived_at=NULL, updated_at=excluded.updated_at`)
         .bind(materialId, product.id, externalMaterialId, internalName, JSON.stringify(translationData(item, "material_lang")), JSON.stringify(translationData(item, "activity_lang")), rawConfig, JSON.stringify(parseJsonObject(rawConfig)), JSON.stringify(item), String(propertyValue(item, "independent_properties", "min_version") ?? ""), String(propertyValue(item, "independent_properties", "max_version") ?? ""), Number(item.listing_status ?? 1), Number(item.create_time ?? now), now),
-      db.prepare(`INSERT INTO material_categories (id, product_id, material_id, category_id, external_relation_id, sort_order, listing_status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, ?) ON CONFLICT(material_id, category_id) DO UPDATE SET external_relation_id=excluded.external_relation_id, listing_status=excluded.listing_status, archived_at=NULL, updated_at=excluded.updated_at`)
-        .bind(relationId, product.id, materialId, group.categoryId, externalRelationId || null, Number(item.listing_status ?? 1), Number(item.create_time ?? now), now),
+      db.prepare(`INSERT INTO material_categories (id, product_id, material_id, category_id, external_relation_id, sort_order, listing_status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?) ON CONFLICT(material_id, category_id) DO UPDATE SET external_relation_id=excluded.external_relation_id, sort_order=excluded.sort_order, listing_status=excluded.listing_status, archived_at=NULL, updated_at=excluded.updated_at`)
+        .bind(relationId, product.id, materialId, group.categoryId, externalRelationId || null, relationSortOrder, Number(item.listing_status ?? 1), Number(item.create_time ?? now), now),
       ...preparedAssets.map((asset) => db.prepare(`INSERT INTO assets (id, product_id, material_id, role, r2_key, storage_provider, oss_key, source_url, file_name, content_type, size, hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'aliyun-oss', ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET product_id=excluded.product_id, material_id=excluded.material_id, role=excluded.role, r2_key=excluded.r2_key, storage_provider='aliyun-oss', oss_key=excluded.oss_key, source_url=excluded.source_url, file_name=excluded.file_name, content_type=excluded.content_type, size=excluded.size, hash=excluded.hash, updated_at=excluded.updated_at`)
         .bind(asset.id, product.id, materialId, asset.role, asset.key, asset.key, asset.sourceURL, asset.fileName, asset.contentType, asset.size, asset.hash, asset.createdAt, now)),
     ];
