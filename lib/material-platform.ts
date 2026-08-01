@@ -1,6 +1,10 @@
 export type JsonObject = Record<string, unknown>;
 export type LangMap = Record<string, { code: string; content: string; is_default: number }>;
 
+export const IMAGE_REFERENCE_INSTRUCTION = "Use the uploaded image as the primary reference. Preserve the subject's identity and key visual features.";
+export const INCOMPLETE_PROMPT_INSTRUCTION = "If the preceding description ends mid-phrase, complete it coherently while preserving the stated concept, composition, lighting, and style.";
+export const MAX_PROMPT_LENGTH = 8000;
+
 export function nowSeconds() { return Math.floor(Date.now() / 1000); }
 export function objectId() {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
@@ -27,6 +31,32 @@ export function parseJsonObject(value: unknown): JsonObject | null {
   if (typeof value !== "string" || !value.trim()) return {};
   try { return safeObject(JSON.parse(value)); } catch {}
   try { return safeObject(JSON.parse(value.replace(/,\s*([}\]])/g, "$1"))); } catch { return null; }
+}
+
+export function applyPromptPolicy(config: JsonObject) {
+  const rawPrompt = typeof config.prompt === "string" ? config.prompt : "";
+  const sourcePrompt = rawPrompt.trim();
+  if (!sourcePrompt) return { config, sourcePromptLength: 0, promptLength: 0, changed: false };
+  const hadImageInstruction = sourcePrompt.includes(IMAGE_REFERENCE_INSTRUCTION);
+  const hadIncompleteInstruction = sourcePrompt.includes(INCOMPLETE_PROMPT_INSTRUCTION);
+  let basePrompt = sourcePrompt;
+  for (const instruction of [IMAGE_REFERENCE_INSTRUCTION, INCOMPLETE_PROMPT_INSTRUCTION]) {
+    if (basePrompt.endsWith(instruction)) basePrompt = basePrompt.slice(0, -instruction.length).trimEnd();
+  }
+  let prompt = basePrompt;
+  if (hadIncompleteInstruction || basePrompt.length >= 1000 || (!hadImageInstruction && rawPrompt.length >= 1000)) prompt += `\n\n${INCOMPLETE_PROMPT_INSTRUCTION}`;
+  prompt += `\n\n${IMAGE_REFERENCE_INSTRUCTION}`;
+  return { config: prompt === sourcePrompt ? config : { ...config, prompt }, sourcePromptLength: basePrompt.length, promptLength: prompt.length, changed: prompt !== sourcePrompt };
+}
+
+export function prepareMaterialConfig(value: unknown) {
+  const config = parseJsonObject(value);
+  if (!config) return { error: "配置必须是 JSON 对象" } as const;
+  const prompt = typeof config.prompt === "string" ? config.prompt.trim() : "";
+  if (!prompt) return { error: "配置中的 prompt 不能为空" } as const;
+  const prepared = applyPromptPolicy({ ...config, prompt });
+  if (prepared.sourcePromptLength > MAX_PROMPT_LENGTH) return { error: `prompt 最多支持 ${MAX_PROMPT_LENGTH} 个字符` } as const;
+  return { config: prepared.config, raw: JSON.stringify(prepared.config), sourcePromptLength: prepared.sourcePromptLength, changed: prepared.changed } as const;
 }
 
 export function propertyValue(item: JsonObject, section: "public_properties" | "independent_properties", key: string) {

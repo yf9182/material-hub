@@ -1,7 +1,7 @@
 import { platformEnv } from "./platform-runtime";
 import { publicOssURL, putOssObject } from "./oss";
 import { ensureSchema } from "./ensure-schema";
-import { emptyIndependentKeys, importedAssetReferences, langMap, nowSeconds, objectId, parseJsonObject, propertyValue, safeObject, translationData, wrapper, type ImportManifest, type ImportedAssetReference } from "./material-platform";
+import { applyPromptPolicy, emptyIndependentKeys, importedAssetReferences, langMap, nowSeconds, objectId, parseJsonObject, prepareMaterialConfig, propertyValue, safeObject, translationData, wrapper, type ImportManifest, type ImportedAssetReference } from "./material-platform";
 
 const productId = "880100000000000000000001";
 
@@ -60,7 +60,7 @@ async function materialDto(row: Row) {
   const assets = (await platformEnv().DB.prepare("SELECT * FROM assets WHERE material_id = ? ORDER BY created_at").bind(row.id).all<Row>()).results;
   const asset = (role: string) => assets.find((item) => item.role === role) ?? (role === "original" ? assets.find((item) => item.role === "thumbnail") : undefined);
   const file = async (item?: Row) => item ? { cdn_url: await assetURL(item), hash: item.hash ?? "", id: item.id, name: item.file_name, size: item.size ?? 0 } : {};
-  const config = parseJsonObject(String(effective.material_config_raw ?? "")) ?? {}; const mediaType = Number(config.type ?? 0); const originalAsset = asset("original"); const fileAsset = asset("file");
+  const storedConfig = parseJsonObject(String(effective.material_config_raw ?? "")) ?? {}; const config = applyPromptPolicy(storedConfig).config; const mediaType = Number(config.type ?? 0); const originalAsset = asset("original"); const fileAsset = asset("file");
   const [configuredFile, originalFile, thumbnailFile, previewFile] = await Promise.all([file(fileAsset), file(originalAsset), file(asset("thumbnail")), file(asset("preview"))]);
   const clientConfig = mediaType === 1
     ? { ...config, file_url: fileAsset ? configuredFile.cdn_url : "" }
@@ -166,7 +166,9 @@ export async function importManifest(product: Row, manifest: ImportManifest, act
     }
     const preparedAssets: PreparedAsset[] = [];
     for (const reference of importedAssetReferences(item)) preparedAssets.push(await prepareImportedAsset(product, materialId, reference, now));
-    const rawConfig = String(propertyValue(item, "public_properties", "material_config") ?? "{}");
+    const sourceRawConfig = String(propertyValue(item, "public_properties", "material_config") ?? "{}");
+    const preparedConfig = prepareMaterialConfig(sourceRawConfig);
+    const rawConfig = "error" in preparedConfig ? sourceRawConfig : preparedConfig.raw;
     const internalName = String(propertyValue(item, "independent_properties", "material_internal_name") || externalMaterialId);
     const statements = [
       db.prepare(`INSERT INTO materials (id, product_id, external_material_id, source_key, internal_name, title_translations, activity_translations, material_config_raw, material_config_json, source_snapshot, manual_overrides, min_version, max_version, is_free, price, listing_status, publish_status, status, created_at, updated_at) VALUES (?, ?, ?, 'reference', ?, ?, ?, ?, ?, ?, '{}', ?, ?, 0, 10, ?, 0, 'draft', ?, ?) ON CONFLICT(product_id, source_key, external_material_id) DO UPDATE SET internal_name=excluded.internal_name, title_translations=excluded.title_translations, activity_translations=excluded.activity_translations, material_config_raw=excluded.material_config_raw, material_config_json=excluded.material_config_json, source_snapshot=excluded.source_snapshot, min_version=excluded.min_version, max_version=excluded.max_version, listing_status=excluded.listing_status, publish_status=0, status='draft', archived_at=NULL, updated_at=excluded.updated_at`)

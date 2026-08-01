@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { importedAssetReferences, isMaterialImportId, langMap, matchesProductContext, normalizeReferencePayload, normalizeSingleMaterialPayload, pageParams, parseJsonObject, parsePrice, preferredTitle, propertyData, propertyValue, sha256Hex, wrapper } from "../lib/material-platform.ts";
+import { applyPromptPolicy, IMAGE_REFERENCE_INSTRUCTION, INCOMPLETE_PROMPT_INSTRUCTION, importedAssetReferences, isMaterialImportId, langMap, matchesProductContext, normalizeReferencePayload, normalizeSingleMaterialPayload, pageParams, parseJsonObject, parsePrice, preferredTitle, prepareMaterialConfig, propertyData, propertyValue, sha256Hex, wrapper } from "../lib/material-platform.ts";
 
 test("repairs conservative trailing commas but preserves unrepairable configs", () => {
   assert.deepEqual(parseJsonObject('{"name":"Face", "type":2,}'), { name: "Face", type: 2 });
   assert.equal(parseJsonObject('{"name":"truncated'), null);
+});
+
+test("adds uploaded-image and truncation safeguards without duplicating them", () => {
+  const short = applyPromptPolicy({ prompt: "Create a portrait." });
+  assert.match(short.config.prompt, new RegExp(IMAGE_REFERENCE_INSTRUCTION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(short.config.prompt, new RegExp(INCOMPLETE_PROMPT_INSTRUCTION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const capped = applyPromptPolicy({ prompt: "x".repeat(1000) });
+  assert.match(capped.config.prompt, new RegExp(INCOMPLETE_PROMPT_INSTRUCTION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.deepEqual(applyPromptPolicy(capped.config).config, capped.config);
+});
+
+test("validates prompt presence and supports long configs", () => {
+  assert.equal(prepareMaterialConfig('{"type":2}').error, "配置中的 prompt 不能为空");
+  assert.equal(prepareMaterialConfig(JSON.stringify({ prompt: "x".repeat(4000) })).sourcePromptLength, 4000);
+  assert.match(prepareMaterialConfig(JSON.stringify({ prompt: "x".repeat(8001) })).error, /8000/);
 });
 
 test("normalizes category trees", () => {

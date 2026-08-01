@@ -15,7 +15,11 @@
     "oss:nano:dry-run": "node scripts/nano-banana-oss-migration.mjs --dry-run --require-known-size",
     "oss:nano:sync": "node scripts/nano-banana-oss-migration.mjs --sync --require-known-size",
     "oss:nano:bind:dry-run": "node scripts/backfill-nano-banana-oss.mjs",
-    "oss:nano:bind": "node scripts/backfill-nano-banana-oss.mjs --apply"
+    "oss:nano:bind": "node scripts/backfill-nano-banana-oss.mjs --apply",
+    "prompts:audit:reference": "node scripts/audit-reference-prompts.mjs",
+    "prompts:audit:production": "node scripts/audit-reference-prompts.mjs --compare-production",
+    "prompts:repair:dry-run": "node scripts/backfill-prompt-policy.mjs",
+    "prompts:repair": "node scripts/backfill-prompt-policy.mjs --apply"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
