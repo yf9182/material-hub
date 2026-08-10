@@ -19,9 +19,7 @@
     "prompts:audit:reference": "node scripts/audit-reference-prompts.mjs",
     "prompts:audit:production": "node scripts/audit-reference-prompts.mjs --compare-production",
     "prompts:repair:dry-run": "node scripts/backfill-prompt-policy.mjs",
-    "prompts:repair": "node scripts/backfill-prompt-policy.mjs --apply",
-    "prices:image:dry-run": "node scripts/backfill-image-template-prices.mjs",
-    "prices:image:apply": "node scripts/backfill-image-template-prices.mjs --apply"
+    "prompts:repair": "node scripts/backfill-prompt-policy.mjs --apply"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
