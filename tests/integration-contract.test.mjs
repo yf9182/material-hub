@@ -42,6 +42,17 @@ test("admin and client contracts include localized titles, media previews, and p
   assert.match(schema, /ADD COLUMN price INTEGER DEFAULT 10/);
 });
 
+test("image generation charging uses authoritative pricing and a stable 10/20 migration", () => {
+  const route = fs.readFileSync(new URL("../app/api/v1/image-generation/charges/route.ts", import.meta.url), "utf8");
+  const service = fs.readFileSync(new URL("../lib/image-generation-charges.ts", import.meta.url), "utf8");
+  const migration = fs.readFileSync(new URL("../drizzle/0003_image_template_points.sql", import.meta.url), "utf8");
+  assert.match(route, /chargeImageGeneration/);
+  assert.match(service, /pixpaint:image:\$\{taskId\}:points:v1/);
+  assert.match(service, /SELECT m\.id, m\.price/);
+  assert.match(migration, /image-template-price-v1/);
+  assert.match(migration, /THEN 10 ELSE 20/);
+});
+
 test("admin and client use the same category-scoped material order", () => {
   const consoleSource = fs.readFileSync(new URL("../app/admin/MaterialConsole.tsx", import.meta.url), "utf8");
   const adminRoute = fs.readFileSync(new URL("../app/api/admin/catalog/route.ts", import.meta.url), "utf8");
