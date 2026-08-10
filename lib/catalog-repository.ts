@@ -23,6 +23,24 @@ export async function productById(id: string) {
   return platformEnv().DB.prepare("SELECT * FROM products WHERE id = ? AND archived_at IS NULL LIMIT 1").bind(id).first<Row>();
 }
 
+export async function materialById(product: Row, materialId: string) {
+  const row = await platformEnv().DB.prepare(`
+    SELECT m.*, r.id relation_id, r.sort_order relation_sort_order,
+           r.listing_status relation_listing_status, r.created_at relation_created_at,
+           r.updated_at relation_updated_at
+      FROM materials m
+      JOIN material_categories r ON r.material_id = m.id AND r.product_id = m.product_id
+      JOIN categories c ON c.id = r.category_id AND c.product_id = r.product_id
+     WHERE m.id = ? AND m.product_id = ?
+       AND m.status = 'published' AND m.publish_status = 1 AND m.archived_at IS NULL
+       AND r.listing_status = 1 AND r.archived_at IS NULL
+       AND c.parent_id IS NOT NULL AND c.status = 'active' AND c.archived_at IS NULL
+     ORDER BY r.sort_order ASC, r.created_at ASC, r.id ASC
+     LIMIT 1
+  `).bind(materialId, product.id).first<Row>();
+  return row ? materialDto(row) : null;
+}
+
 export async function categoryTree(product: Row) {
   const rows = (await platformEnv().DB.prepare("SELECT * FROM categories WHERE product_id = ? AND status = 'active' AND archived_at IS NULL ORDER BY COALESCE(parent_id, id), sort_order, created_at, id").bind(product.id).all<Row>()).results;
   return rows.filter((row) => !row.parent_id).map((root) => categoryNode(root, rows.filter((row) => row.parent_id === root.id).map((row) => categoryNode(row, []))));
@@ -54,7 +72,7 @@ export async function materialGroups(product: Row, categoryIds: string[], page: 
   return groups;
 }
 
-async function materialDto(row: Row) {
+export async function materialDto(row: Row) {
   const overrides = parse<Record<string, unknown>>(row.manual_overrides, {});
   const effective = { ...row, ...overrides };
   const assets = (await platformEnv().DB.prepare("SELECT * FROM assets WHERE material_id = ? ORDER BY created_at").bind(row.id).all<Row>()).results;

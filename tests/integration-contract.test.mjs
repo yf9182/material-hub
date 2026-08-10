@@ -42,6 +42,18 @@ test("admin and client contracts include localized titles, media previews, and p
   assert.match(schema, /ADD COLUMN price INTEGER DEFAULT 10/);
 });
 
+test("image template detail and stable point-price backfill contracts exist", () => {
+  const route = fs.readFileSync(new URL("../app/api/v1/product-material/[materialId]/route.ts", import.meta.url), "utf8");
+  const script = fs.readFileSync(new URL("../scripts/backfill-image-template-prices.mjs", import.meta.url), "utf8");
+  const repository = fs.readFileSync(new URL("../lib/catalog-repository.ts", import.meta.url), "utf8");
+  assert.match(route, /requireApiProduct/);
+  assert.match(route, /MATERIAL_NOT_FOUND/);
+  assert.match(repository, /export async function materialById/);
+  assert.match(script, /image-template-price-v2/);
+  assert.match(script, /THEN 10 ELSE 20|charCodeAt/);
+  assert.match(script, /material\.price\.backup/);
+});
+
 test("admin and client use the same category-scoped material order", () => {
   const consoleSource = fs.readFileSync(new URL("../app/admin/MaterialConsole.tsx", import.meta.url), "utf8");
   const adminRoute = fs.readFileSync(new URL("../app/api/admin/catalog/route.ts", import.meta.url), "utf8");
