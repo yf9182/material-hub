@@ -1,0 +1,11 @@
+# Project-local MCP registration for Codex.
+# Keep the token in the local environment; never commit it to this file.
+
+[mcp_servers.material_hub_trending]
+command = "node"
+args = ["--import", "tsx", "mcp/trending-template-server.ts"]
+cwd = "."
+env_vars = ["MATERIAL_HUB_BASE_URL", "MATERIAL_HUB_MCP_TOKEN", "MATERIAL_HUB_MCP_TOKEN_FILE", "MATERIAL_HUB_MCP_MEDIA_ROOT"]
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"

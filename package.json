@@ -21,13 +21,17 @@
     "prompts:repair:dry-run": "node scripts/backfill-prompt-policy.mjs",
     "prompts:repair": "node scripts/backfill-prompt-policy.mjs --apply",
     "prices:image:dry-run": "node scripts/backfill-image-template-prices.mjs",
-    "prices:image:apply": "node scripts/backfill-image-template-prices.mjs --apply"
+    "prices:image:apply": "node scripts/backfill-image-template-prices.mjs --apply",
+    "mcp": "tsx mcp/trending-template-server.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "sharp": "0.35.3",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
@@ -41,6 +45,7 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "react-server-dom-webpack": "19.2.6",
+    "tsx": "4.22.1",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "vinext": "0.0.50",

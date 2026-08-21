@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trending Template Publisher"
+  short_description: "Research trends and stage safe image templates"
+  default_prompt: "Use $trending-template-publisher to research current image-to-image trends, stage three templates, and wait for my approval before publishing."
