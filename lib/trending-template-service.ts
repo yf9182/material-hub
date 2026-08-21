@@ -1,5 +1,6 @@
 import { platformEnv } from "./platform-runtime";
-import { IMAGE_REFERENCE_INSTRUCTION, nowSeconds, objectId, prepareMaterialConfig, sha256Hex } from "./material-platform";
+import { IMAGE_REFERENCE_INSTRUCTION, nowSeconds, objectId, sha256Hex } from "./material-platform";
+import { standardizeMaterialConfig } from "./standard-material";
 
 export const TRENDING_CATEGORY_EXTERNAL_ID = "mcp-trending";
 export const TRENDING_SOURCE_KEY = "mcp-trending";
@@ -355,8 +356,9 @@ export async function inspectTrendingContext(productId: string, origin: string) 
 
 export async function stageTrendingTemplate(productId: string, actor: string, input: StageTemplateInput, origin: string) {
   validateStageInput(input);
-  const preparedConfig = prepareMaterialConfig(JSON.stringify({ type: input.displayType, image_count: input.imageCount, price: input.price, prompt: input.prompt.trim() }));
-  if ("error" in preparedConfig) throw new Error(preparedConfig.error);
+  const standardized = standardizeMaterialConfig({ type: input.displayType, image_count: input.imageCount, price: input.price, prompt: input.prompt.trim() });
+  if (standardized.errors.length) throw new Error(standardized.errors.join("; "));
+  const preparedConfig = { raw: JSON.stringify(standardized.config), config: standardized.config };
   const category = await ensureTrendingCategory(productId, actor);
   const db = platformEnv().DB;
   const externalMaterialId = `trend:${input.trendKey}`;
