@@ -33,6 +33,8 @@
 
 `prompt` 必须存在且不超过 8000 个字符。系统会自动补充图像参考策略，并在必要时补充长 Prompt 完整性策略。`material.price` 和 `config.price` 始终保持一致。`file_url` 只用于确实需要外部结果文件 URL 的场景，并且必须是 HTTPS。
 
+`preset=image_to_video` 时必须包含 `video_duration`（`5`、`10` 或 `15` 秒）和 `video_resolution`（`720p` 或 `1080p`）。缺省值分别为 `5` 和 `720p`。
+
 ## MCP 调用顺序
 
 1. 调用 `list_products`，确认目标 PID。

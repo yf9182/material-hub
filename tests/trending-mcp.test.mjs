@@ -10,7 +10,7 @@ const root = new URL("../", import.meta.url);
 
 test("Trending service keeps display type independent from input image count", async () => {
   const source = await readFile(new URL("lib/trending-template-service.ts", root), "utf8");
-  assert.match(source, /type: input\.displayType, image_count: input\.imageCount, price: input\.price/);
+  assert.match(source, /preset: "image_to_video", type: input\.displayType, image_count: input\.imageCount, video_duration: input\.videoDuration, video_resolution: input\.videoResolution, price: input\.price/);
   assert.match(source, /displayType === 1 && \(!input\.beforeCover \|\| !input\.afterCover\)/);
   assert.match(source, /displayType === 2 && !input\.cover/);
   assert.match(source, /source_key=\? AND external_material_id=\?/);

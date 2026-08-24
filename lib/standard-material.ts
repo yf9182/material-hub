@@ -9,6 +9,10 @@ export type StandardMaterialInput = {
   type?: unknown;
   image_count?: unknown;
   imageCount?: unknown;
+  video_duration?: unknown;
+  videoDuration?: unknown;
+  video_resolution?: unknown;
+  videoResolution?: unknown;
   price?: unknown;
   prompt?: unknown;
   file_url?: unknown;
@@ -24,7 +28,7 @@ export type StandardConfigResult = {
   changed: boolean;
 };
 
-const CORE_KEYS = new Set(["schema_version", "preset", "type", "image_count", "price", "prompt", "file_url", "extensions"]);
+const CORE_KEYS = new Set(["schema_version", "preset", "type", "image_count", "video_duration", "video_resolution", "price", "prompt", "file_url", "extensions"]);
 
 function integer(value: unknown, fallback: number) {
   const parsed = Number(value);
@@ -46,6 +50,8 @@ export function standardizeMaterialConfig(input: StandardMaterialInput | JsonObj
   const preset = String(source.preset ?? "image_to_image").trim();
   const type = integer(source.type, 2);
   const imageCount = integer(source.image_count ?? source.imageCount, 1);
+  const videoDuration = integer(source.video_duration ?? source.videoDuration, 5);
+  const videoResolution = String(source.video_resolution ?? source.videoResolution ?? "720p").trim();
   const defaultPrice = preset === "image_to_video" ? 20 : 10;
   const price = integer(source.price, defaultPrice);
   const prompt = String(source.prompt ?? "").trim();
@@ -54,6 +60,8 @@ export function standardizeMaterialConfig(input: StandardMaterialInput | JsonObj
   if (!STANDARD_PRESETS.includes(preset as StandardPreset)) errors.push("preset 必须是 image_to_image 或 image_to_video");
   if (type !== 1 && type !== 2) errors.push("type 必须是 1 或 2");
   if (imageCount !== 1 && imageCount !== 2) errors.push("image_count 必须是 1 或 2");
+  if (preset === "image_to_video" && ![5, 10, 15].includes(videoDuration)) errors.push("video_duration 必须是 5、10 或 15 秒");
+  if (preset === "image_to_video" && !["720p", "1080p"].includes(videoResolution)) errors.push("video_resolution 必须是 720p 或 1080p");
   if (!Number.isInteger(price) || price < 0) errors.push("price 必须是非负整数");
   if (!prompt) errors.push("配置中的 prompt 不能为空");
   if (prompt.length > MAX_PROMPT_LENGTH) errors.push(`prompt 最多支持 ${MAX_PROMPT_LENGTH} 个字符`);
@@ -69,6 +77,7 @@ export function standardizeMaterialConfig(input: StandardMaterialInput | JsonObj
     preset,
     type,
     image_count: imageCount,
+    ...(preset === "image_to_video" ? { video_duration: videoDuration, video_resolution: videoResolution } : {}),
     price,
     ...promptPolicy.config,
     ...(fileURL ? { file_url: fileURL } : {}),

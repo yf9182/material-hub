@@ -377,6 +377,8 @@ type MaterialConfig = {
   preset?: "image_to_image" | "image_to_video";
   type?: 1 | 2;
   image_count?: 1 | 2;
+  video_duration?: 5 | 10 | 15;
+  video_resolution?: "720p" | "1080p";
   price?: number;
   prompt?: string;
   file_url?: string;

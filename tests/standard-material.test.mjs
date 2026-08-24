@@ -12,11 +12,19 @@ test("standard config defaults and prompt policy are stable", () => {
   assert.match(String(result.config.prompt), /Use the uploaded image as the primary reference/);
 });
 
-test("video preset defaults to the video price and preserves namespaced extensions", () => {
-  const result = validateStandardMaterialConfig({ preset: "image_to_video", prompt: "Animate the uploaded scene with a slow camera move.", extensions: { app_demo: { motion: "slow" } } });
+test("video preset includes duration and resolution and preserves namespaced extensions", () => {
+  const result = validateStandardMaterialConfig({ preset: "image_to_video", prompt: "Animate the uploaded scene with a slow camera move.", video_duration: 15, video_resolution: "1080p", extensions: { app_demo: { motion: "slow" } } });
   assert.deepEqual(result.errors, []);
   assert.equal(result.config.price, 20);
+  assert.equal(result.config.video_duration, 15);
+  assert.equal(result.config.video_resolution, "1080p");
   assert.deepEqual(result.config.extensions, { app_demo: { motion: "slow" } });
+});
+
+test("video duration and resolution reject unsupported values", () => {
+  const result = validateStandardMaterialConfig({ preset: "image_to_video", prompt: "Animate the uploaded scene.", video_duration: 8, video_resolution: "4k" });
+  assert.ok(result.errors.some((error) => error.includes("video_duration")));
+  assert.ok(result.errors.some((error) => error.includes("video_resolution")));
 });
 
 test("core fields cannot be replaced by extension-like top-level fields", () => {

@@ -48,6 +48,8 @@ export type StageTemplateInput = {
   displayType: DisplayType;
   imageCount: 1 | 2;
   price: 10 | 20;
+  videoDuration: 5 | 10 | 15;
+  videoResolution: "720p" | "1080p";
   evidence: TrendEvidence[];
   safetyReview: SafetyReview;
   selectionReason?: string;
@@ -80,6 +82,8 @@ export type TemplatePreview = {
   displayType: DisplayType;
   imageCount: 1 | 2;
   price: 10 | 20;
+  videoDuration: 5 | 10 | 15;
+  videoResolution: "720p" | "1080p";
   status: string;
   publishStatus: number;
   revision: string;
@@ -219,6 +223,8 @@ function validateStageInput(input: StageTemplateInput) {
   if (input.displayType !== 1 && input.displayType !== 2) throw new Error("displayType 只能是 1 或 2");
   if (input.imageCount !== 1 && input.imageCount !== 2) throw new Error("imageCount 只能是 1 或 2");
   if (input.price !== 10 && input.price !== 20) throw new Error("价格只能是 10 或 20 积分");
+  if (![5, 10, 15].includes(input.videoDuration)) throw new Error("videoDuration 只能是 5、10 或 15 秒");
+  if (input.videoResolution !== "720p" && input.videoResolution !== "1080p") throw new Error("videoResolution 只能是 720p 或 1080p");
   if (input.selectionReason !== undefined && !safeText(input.selectionReason)) throw new Error("selectionReason 不能为空");
   if (input.coverReason !== undefined && !safeText(input.coverReason)) throw new Error("coverReason 不能为空");
   validateTrendEvidence(input.evidence);
@@ -321,7 +327,7 @@ export async function previewTemplate(productId: string, materialId: string, ori
   const revision = await revisionFor(row, assets);
   const before = assets.find((asset: Row) => safeText(asset.role) === "thumbnail");
   const after = assets.find((asset: Row) => safeText(asset.role) === "original");
-  return { id: safeText(row.id), trendKey: source.trendKey, title: safeText(titleTranslations.en?.content), titleZh: safeText(titleTranslations["zh-cn"]?.content), concept: source.concept, prompt: safeText(config.prompt), beforePrompt: safeText(source.beforePrompt) || undefined, displayType, imageCount: rawImageCount as 1 | 2, price: rawPrice as 10 | 20, status: safeText(row.status), publishStatus: Number(row.publish_status ?? 0), revision, evidence: source.evidence, safetyReview: source.safetyReview, selectionReason: source.selectionReason, coverReason: source.coverReason, assets: displayType === 1 ? { before: assetPreview(before, origin), after: assetPreview(after, origin) } : { cover: assetPreview(before, origin), original: assetPreview(after, origin) } };
+  return { id: safeText(row.id), trendKey: source.trendKey, title: safeText(titleTranslations.en?.content), titleZh: safeText(titleTranslations["zh-cn"]?.content), concept: source.concept, prompt: safeText(config.prompt), beforePrompt: safeText(source.beforePrompt) || undefined, displayType, imageCount: rawImageCount as 1 | 2, price: rawPrice as 10 | 20, videoDuration: Number(config.video_duration) as 5 | 10 | 15, videoResolution: safeText(config.video_resolution) as "720p" | "1080p", status: safeText(row.status), publishStatus: Number(row.publish_status ?? 0), revision, evidence: source.evidence, safetyReview: source.safetyReview, selectionReason: source.selectionReason, coverReason: source.coverReason, assets: displayType === 1 ? { before: assetPreview(before, origin), after: assetPreview(after, origin) } : { cover: assetPreview(before, origin), original: assetPreview(after, origin) } };
 }
 
 export async function inspectTrendingContext(productId: string, origin: string) {
@@ -356,7 +362,7 @@ export async function inspectTrendingContext(productId: string, origin: string) 
 
 export async function stageTrendingTemplate(productId: string, actor: string, input: StageTemplateInput, origin: string) {
   validateStageInput(input);
-  const standardized = standardizeMaterialConfig({ type: input.displayType, image_count: input.imageCount, price: input.price, prompt: input.prompt.trim() });
+  const standardized = standardizeMaterialConfig({ preset: "image_to_video", type: input.displayType, image_count: input.imageCount, video_duration: input.videoDuration, video_resolution: input.videoResolution, price: input.price, prompt: input.prompt.trim() });
   if (standardized.errors.length) throw new Error(standardized.errors.join("; "));
   const preparedConfig = { raw: JSON.stringify(standardized.config), config: standardized.config };
   const category = await ensureTrendingCategory(productId, actor);
@@ -448,5 +454,5 @@ export async function publishTrendingTemplates(productId: string, actor: string,
 
 export function parseStageForm(form: FormData): StageTemplateInput {
   const jsonValue = <T>(name: string, fallback: T) => parse<T>(form.get(name), fallback);
-  return { trendKey: safeText(form.get("trendKey")), concept: safeText(form.get("concept")), name: safeText(form.get("name")), nameZh: safeText(form.get("nameZh")), prompt: safeText(form.get("prompt")), beforePrompt: safeText(form.get("beforePrompt")) || undefined, displayType: Number(form.get("displayType")) as DisplayType, imageCount: Number(form.get("imageCount")) as 1 | 2, price: Number(form.get("price")) as 10 | 20, evidence: jsonValue<TrendEvidence[]>("evidence", []), safetyReview: jsonValue<SafetyReview>("safetyReview", { passed: false, policy: "safe-adaptation", notes: "" }), selectionReason: safeText(form.get("selectionReason")) || undefined, coverReason: safeText(form.get("coverReason")) || undefined, beforeCover: form.get("beforeCover") instanceof File ? form.get("beforeCover") as File : undefined, afterCover: form.get("afterCover") instanceof File ? form.get("afterCover") as File : undefined, cover: form.get("cover") instanceof File ? form.get("cover") as File : undefined };
+  return { trendKey: safeText(form.get("trendKey")), concept: safeText(form.get("concept")), name: safeText(form.get("name")), nameZh: safeText(form.get("nameZh")), prompt: safeText(form.get("prompt")), beforePrompt: safeText(form.get("beforePrompt")) || undefined, displayType: Number(form.get("displayType")) as DisplayType, imageCount: Number(form.get("imageCount")) as 1 | 2, price: Number(form.get("price")) as 10 | 20, videoDuration: Number(form.get("videoDuration") || 5) as 5 | 10 | 15, videoResolution: safeText(form.get("videoResolution") || "720p") as "720p" | "1080p", evidence: jsonValue<TrendEvidence[]>("evidence", []), safetyReview: jsonValue<SafetyReview>("safetyReview", { passed: false, policy: "safe-adaptation", notes: "" }), selectionReason: safeText(form.get("selectionReason")) || undefined, coverReason: safeText(form.get("coverReason")) || undefined, beforeCover: form.get("beforeCover") instanceof File ? form.get("beforeCover") as File : undefined, afterCover: form.get("afterCover") instanceof File ? form.get("afterCover") as File : undefined, cover: form.get("cover") instanceof File ? form.get("cover") as File : undefined };
 }

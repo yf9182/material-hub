@@ -286,6 +286,8 @@ server.registerTool("stage_trending_template", {
     displayType: z.union([z.literal(1), z.literal(2)]),
     imageCount: z.union([z.literal(1), z.literal(2)]),
     price: z.union([z.literal(10), z.literal(20)]),
+    videoDuration: z.union([z.literal(5), z.literal(10), z.literal(15)]).default(5),
+    videoResolution: z.enum(["720p", "1080p"]).default("720p"),
     evidence: evidenceSchema,
     safetyReview: safetySchema,
     selectionReason: z.string().optional(),
